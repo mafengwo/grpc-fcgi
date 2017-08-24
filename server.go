@@ -27,7 +27,7 @@ type Server struct {
 	server       *http.Server
 	grpc         *grpc.Server
 	logger       *zap.Logger
-	clientPool   *clientPool
+	client       *client
 }
 
 // TODO: TLS support
@@ -56,8 +56,7 @@ func NewServer(options ...OptionsFunc) (*Server, error) {
 		s.logger = l
 	}
 
-	// TODO: adjust client pool size
-	s.clientPool = newClientPool(s, s.fastEndpoint, 4)
+	s.client = newClient(s, s.fastEndpoint, 4)
 
 	return s, nil
 }

@@ -4,7 +4,9 @@
 package proxy
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -79,12 +81,6 @@ func (protoCodec) String() string {
 	return "proto"
 }
 
-func (s *Server) request(r *http.Request, body []byte, script string) (*fastcgiResponse, error) {
-	c := s.clientPool.acquire()
-	defer c.release()
-	return c.request(r, body, s.entryFile)
-}
-
 func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error {
 	lowLevelServerStream, ok := transport.StreamFromContext(stream.Context())
 	if !ok {
@@ -111,10 +107,12 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 			Scheme: "http",
 			Path:   fullMethodName,
 		},
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Header:     make(http.Header),
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        make(http.Header),
+		ContentLength: int64(len(f.payload)),
+		Body:          ioutil.NopCloser(bytes.NewBuffer(f.payload)),
 	}
 
 	req = req.WithContext(clientCtx)
@@ -135,7 +133,7 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	req.Header.Set("Host", host)
 	req.URL.Host = host
 
-	resp, err := s.request(req, f.payload, s.entryFile)
+	resp, err := s.client.request(req, s.entryFile)
 
 	if err != nil {
 
@@ -151,10 +149,9 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 		payload: resp.body,
 	}
 
-	// TODO: construct metdata to send back
 	responseMetadata := metadata.MD{}
 
-	for k, v := range resp.response.Header {
+	for k, v := range resp.header {
 		// this probably need to be munged?
 		responseMetadata[strings.ToLower(k)] = v
 	}
