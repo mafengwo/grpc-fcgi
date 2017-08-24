@@ -1,5 +1,4 @@
-# grpc-fastcgi-server
-===============
+# grpc-fastcgi-proxy
 
 Simple [grpc](http://www.grpc.io/)-to-fastcgi proxy.
 
