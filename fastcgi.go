@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/textproto"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -84,6 +85,7 @@ func (c *client) request(r *http.Request, script string) (*fastcgiResponse, erro
 
 	params := fcgi.ParamsFromRequest(r)
 	params["SCRIPT_FILENAME"] = []string{script}
+	params["DOCUMENT_ROOT"] = []string{filepath.Dir(script)}
 
 	response := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
