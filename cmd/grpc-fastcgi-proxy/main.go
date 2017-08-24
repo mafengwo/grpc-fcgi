@@ -61,7 +61,7 @@ func runServer(cmd *cobra.Command, args []string) {
 
 func main() {
 	addr = rootCmd.PersistentFlags().StringP("address", "a", "127.0.0.1:8080", "listen address")
-	fastcgi = rootCmd.PersistentFlags().StringP("fastcgi", "f", "127.0.0.1:9090", "fastcgi to proxy")
+	fastcgi = rootCmd.PersistentFlags().StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
 
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)

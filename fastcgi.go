@@ -1,82 +1,79 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"io/ioutil"
+	"math"
 	"net/http"
+	"net/textproto"
 	"strconv"
-	"time"
+	"sync"
 
+	"github.com/kellegous/fcgi"
 	"github.com/pkg/errors"
-	fcgiclient "github.com/tomasen/fcgi_client"
 )
 
 type client struct {
-	*fcgiclient.FCGIClient
-	pool *clientPool
-}
-
-type clientPool struct {
-	addr    string
-	clients chan *client
-	server  *Server
+	sync.Mutex
+	max    int
+	addr   string
+	client *fcgi.Client
+	server *Server
 }
 
 type fastcgiResponse struct {
-	code     int
-	body     []byte
-	response *http.Response
+	code   int
+	body   []byte
+	header http.Header
 }
 
-func newClientPool(s *Server, addr string, num int) *clientPool {
-	p := &clientPool{
-		addr:    addr,
-		clients: make(chan *client, num),
-		server:  s,
+func newClient(s *Server, addr string, num int) *client {
+	p := &client{
+		addr:   addr,
+		max:    num,
+		server: s,
 	}
 
-	for i := 0; i < num; i++ {
-		p.clients <- &client{pool: p}
+	if p.max > math.MaxUint16 {
+		p.max = math.MaxUint16
 	}
+
 	return p
-}
-
-// XXX: should we have a maximum amount of time we will wait for a client
-func (p *clientPool) acquire() *client {
-	return <-p.clients
-}
-
-func (c *client) release() {
-	c.pool.clients <- c
 }
 
 // TODO: use a backoff
 func (c *client) connect() error {
-	if c.FCGIClient != nil {
+	c.Lock()
+	defer c.Unlock()
+	if c.client != nil {
 		return nil
 	}
 
 	// TODO: configurable timeout
-	f, err := fcgiclient.DialTimeout("tcp", c.pool.addr, 2*time.Second)
+	f, err := fcgi.Dial("tcp", c.addr)
 
 	if err != nil {
 		return errors.Wrap(err, "dial failed")
 	}
 
-	c.FCGIClient = f
+	c.client = f
 
 	return nil
 }
 
 func (c *client) close() {
-	if c.FCGIClient == nil {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.client == nil {
 		return
 	}
-	c.FCGIClient.Close()
-	c.FCGIClient = nil
+	c.client.Close()
+	c.client = nil
 }
 
-func (c *client) request(r *http.Request, body []byte, script string) (*fastcgiResponse, error) {
+func (c *client) request(r *http.Request, script string) (*fastcgiResponse, error) {
 	resp := &fastcgiResponse{}
 
 	if err := c.connect(); err != nil {
@@ -85,53 +82,63 @@ func (c *client) request(r *http.Request, body []byte, script string) (*fastcgiR
 		return resp, err
 	}
 
-	// TODO: more fields
-	env := map[string]string{
-		"SCRIPT_FILENAME":   script,
-		"REQUEST_URI":       r.RequestURI,
-		"REQUEST_METHOD":    r.Method,
-		"CONTENT_LENGTH":    strconv.Itoa(len(body)),
-		"GATEWAY_INTERFACE": "CGI/1.1",
-		"QUERY_STRING":      r.URL.RawQuery,
-		"DOCUMENT_ROOT":     c.pool.server.docRoot,
-		"SCRIPT_NAME":       r.URL.Path,
-	}
+	params := fcgi.ParamsFromRequest(r)
+	params["SCRIPT_FILENAME"] = []string{script}
 
-	ct := r.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "application/grpc"
-	}
-	env["CONTENT_TYPE"] = ct
+	response := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
 
-	rawResponse, err := c.Request(env, bytes.NewBuffer(body))
+	req, err := c.client.BeginRequest(params, r.Body, response, stderr)
 	if err != nil {
 		resp.code = 500
 		c.close()
 		return resp, errors.Wrap(err, "failed to post to fasctgi")
 	}
 
-	defer rawResponse.Body.Close()
+	if err := req.Wait(); err != nil {
+		resp.code = 500
+		// XXX: close the client?
+		return resp, errors.Wrap(err, "failed to wait on fastcgi response")
+	}
 
-	content, err := ioutil.ReadAll(rawResponse.Body)
+	br := bufio.NewReader(response)
+	tr := textproto.NewReader(br)
+	mh, err := tr.ReadMIMEHeader()
 	if err != nil {
 		resp.code = 500
-		c.close()
+		// XXX: close the client?
+		return resp, errors.Wrap(err, "failed to read response headers")
+	}
+	resp.header = http.Header(mh)
+	resp.code, err = statusFromHeaders(resp.header)
+
+	if err != nil {
+		resp.code = 500
+		// ?? c.close()
+		return resp, errors.Wrap(err, "failed to get status")
+	}
+
+	content, err := ioutil.ReadAll(br)
+	if err != nil {
+		resp.code = 500
+		// ?? c.close()
 		return resp, errors.Wrap(err, "failed to read response from fastci")
 	}
 
-	header := rawResponse.Header.Get("Status")
-	if header != "" {
-		code, err := strconv.Atoi(header[0:3])
-		if err != nil {
-			return nil, errors.Wrap(err, "bad status code")
-		}
-		rawResponse.StatusCode = code
-	}
-
-	resp.code = rawResponse.StatusCode
-	resp.response = rawResponse
 	resp.body = content
 
 	return resp, nil
 
+}
+
+func statusFromHeaders(h http.Header) (int, error) {
+	text := h.Get("Status")
+
+	h.Del("Status")
+
+	if text == "" {
+		return 200, nil
+	}
+
+	return strconv.Atoi(text[0:3])
 }
