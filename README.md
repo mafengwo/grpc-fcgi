@@ -14,7 +14,7 @@ There is an official
 for PHP, but no server support.  At my dayjob, we use a lot of PHP, so I wanted
 to experiment with gRPC servers in PHP.
 
-This project is only the proxy. There is [another repo](https://github.com/bakins/grpc-fastcgi-example)) with an example PHP
+This project is only the proxy. There is [another repo](https://github.com/bakins/grpc-fastcgi-example) with an example PHP
 application.  That example is used in the testing of this project.
 
 ## Building/Installing
