@@ -7,3 +7,14 @@ install:
 - true
 script:
 - "./script/build"
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: EMj8AUq37JUAy8Y7b7+5gFKIj/q8jnVlL6D2g0r3ZLfUIt2p09hFepbnIjArD36MQQGAsa1R4Hn5bv+N5GdUVWhkfhnW4Pv9J0b33iTvXf5MzykHRXe/g/25hL0B37dVhbasXjI8y+C7rfW4l1w5t98cQ/CePVB12cklYjjHl+zAIPo5gqEbBRIBD984hE71Eda99L0+buOTs6qHeof2IAgByBu+qn/t7G+bCrch4YyrlWx57QJJleKvN4JFu9RSlS/oJ+je/c1RS0VR8+yE14g91JOusCvxQ7b+WZFO8bDN2E8F9WgHGHWbn+dyTDsdI2ynHhzHefsMZHcPzz6v8Uvvl70Q1Amt8diIdQ5OeE/qDWBvFCJkWMr3ilfb+LrpItwx3cSZJr3262XxC9fa2SkKQDlPGui6XEYhy/z7W20+ibzuLuKohYNwCKG8PXYl4jpDVQ0prqMhQXqZM7DoVxAcFkVJ2CXUbts8np4JhBn2SIevyJHFySdVQ/M48jk2FZZyiKOG8vomSRXlP5IEeO847EyN8VgCumzduvRDzMTbcg9MF8QJA54WYidL3oW8fdLpV+r3yuGpk0pXHAcy+XtlkhvHlnGbWS+bw3mWkaSWl9KP7izo9qaVnPlfbNcFP41bL+Udj/DiXLogr0QqrqouFTAvu4557dtnuB5nVZE=
+  file: 
+  - grpc-fastcgi-proxy.linux.amd64
+  - grpc-fastcgi-proxy.darwin.amd64
+  on:
+    repo: bakins/grpc-fastcgi-proxy
+    tags: true
