@@ -44,6 +44,12 @@
   version = "v1.0"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/kellegous/fcgi"
+  packages = ["."]
+  revision = "7803f11e551bcb62d97d39a3e9bd39be5a732580"
+
+[[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
   packages = ["pbutil"]
   revision = "3247c84500bff8d9fb6d579d800f20b3e091582c"
@@ -92,12 +98,6 @@
   version = "v1.0.0"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/tomasen/fcgi_client"
-  packages = ["."]
-  revision = "b116e704d8674fccc547f9a4d197d6a7bd22ca61"
-
-[[projects]]
   name = "go.uber.org/atomic"
   packages = ["."]
   revision = "4e336646b2ef9fc6e47be8e21594178f98e5ebcf"
@@ -135,13 +135,13 @@
 
 [[projects]]
   name = "google.golang.org/grpc"
-  packages = [".","codes","connectivity","credentials","examples/helloworld/helloworld","grpclb/grpc_lb_v1","grpclog","internal","keepalive","metadata","naming","peer","stats","status","tap","transport"]
+  packages = [".","codes","connectivity","credentials","grpclb/grpc_lb_v1","grpclog","internal","keepalive","metadata","naming","peer","stats","status","tap","transport"]
   revision = "b3ddf786825de56a4178401b7e174ee332173b66"
   version = "v1.5.2"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "889085f743307441d90112427536c8ca8eb5bff9975f12a1d6e3431164a180d5"
+  inputs-digest = "4a6b2453fe64596ac45c60ac2120560491bc2f384357db38370d526acfaba833"
   solver-name = "gps-cdcl"
   solver-version = 1
