@@ -1,26 +1,27 @@
 package proxy
 
 import (
-	"bufio"
-	"bytes"
+	"fmt"
 	"io/ioutil"
-	"math"
 	"net/http"
-	"net/textproto"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
-	"github.com/kellegous/fcgi"
+	fcgi "github.com/bakins/grpc-fastcgi-proxy/internal/fcgi_client"
 	"github.com/pkg/errors"
 )
 
+type clientWrapper struct {
+	*fcgi.FCGIClient
+}
+
 type client struct {
 	sync.Mutex
-	max    int
-	addr   string
-	client *fcgi.Client
-	server *Server
+	addr    string
+	clients chan *clientWrapper
+	server  *Server
 }
 
 type fastcgiResponse struct {
@@ -31,106 +32,96 @@ type fastcgiResponse struct {
 
 func newClient(s *Server, addr string, num int) *client {
 	p := &client{
-		addr:   addr,
-		max:    num,
-		server: s,
+		addr:    addr,
+		server:  s,
+		clients: make(chan *clientWrapper, num),
 	}
 
-	if p.max > math.MaxUint16 {
-		p.max = math.MaxUint16
+	for i := 0; i < num; i++ {
+		p.clients <- &clientWrapper{}
 	}
 
 	return p
 }
 
-// TODO: use a backoff
-func (c *client) connect() error {
-	c.Lock()
-	defer c.Unlock()
-	if c.client != nil {
-		return nil
+func (c *client) acquireClient() (*clientWrapper, error) {
+	w := <-c.clients
+
+	if w.FCGIClient != nil {
+		return w, nil
 	}
 
-	// TODO: configurable timeout
-	f, err := fcgi.Dial("tcp", c.addr)
-
+	f, err := fcgi.DialTimeout("tcp", c.addr, 3*time.Second)
 	if err != nil {
-		return errors.Wrap(err, "dial failed")
+		return nil, errors.Wrap(err, "dial failed")
 	}
 
-	c.client = f
+	w.FCGIClient = f
 
-	return nil
+	return w, nil
 }
 
-func (c *client) close() {
-	c.Lock()
-	defer c.Unlock()
+func (c *client) releaseClient(w *clientWrapper) {
+	c.clients <- w
+}
 
-	if c.client == nil {
+func (w *clientWrapper) close() {
+	if w.FCGIClient == nil {
 		return
 	}
-	c.client.Close()
-	c.client = nil
+
+	w.FCGIClient.Close()
+
+	w.FCGIClient = nil
 }
 
 func (c *client) request(r *http.Request, script string) (*fastcgiResponse, error) {
 	resp := &fastcgiResponse{}
-
-	if err := c.connect(); err != nil {
-		resp.code = 502
-		c.close()
-		return resp, err
-	}
-
-	params := fcgi.ParamsFromRequest(r)
-	params["SCRIPT_FILENAME"] = []string{script}
-	params["DOCUMENT_ROOT"] = []string{filepath.Dir(script)}
-
-	response := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-
-	req, err := c.client.BeginRequest(params, r.Body, response, stderr)
+	w, err := c.acquireClient()
 	if err != nil {
 		resp.code = 500
-		c.close()
-		return resp, errors.Wrap(err, "failed to post to fasctgi")
+		return resp, errors.Wrap(err, "Failed to acquire client")
+	}
+	defer c.releaseClient(w)
+
+	params := map[string]string{
+		"SCRIPT_FILENAME": script,
+		"DOCUMENT_ROOT":   filepath.Dir(script),
+		"REQUEST_METHOD":  r.Method,
+		"SERVER_PROTOCOL": fmt.Sprintf("HTTP/%d.%d", r.ProtoMajor, r.ProtoMinor),
+		"HTTP_HOST":       r.Host,
+		"CONTENT_LENGTH":  fmt.Sprintf("%d", r.ContentLength),
+		"CONTENT_TYPE":    r.Header.Get("Content-Type"),
+		"REQUEST_URI":     r.RequestURI,
+		"PATH_INFO":       r.URL.Path,
 	}
 
-	if err := req.Wait(); err != nil {
-		resp.code = 500
-		// XXX: close the client?
-		return resp, errors.Wrap(err, "failed to wait on fastcgi response")
-	}
-
-	br := bufio.NewReader(response)
-	tr := textproto.NewReader(br)
-	mh, err := tr.ReadMIMEHeader()
+	response, err := w.Request(params, r.Body)
 	if err != nil {
 		resp.code = 500
-		// XXX: close the client?
-		return resp, errors.Wrap(err, "failed to read response headers")
+		w.close()
+		return resp, errors.Wrap(err, "failed to make fasctgi request")
 	}
-	resp.header = http.Header(mh)
+
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		resp.code = 500
+		w.close()
+		return resp, errors.Wrap(err, "failed to read response from fastci")
+	}
+
+	resp.code = response.StatusCode
+	resp.body = content
+	resp.header = response.Header
 	resp.code, err = statusFromHeaders(resp.header)
 
 	if err != nil {
 		resp.code = 500
-		// ?? c.close()
+		w.close()
 		return resp, errors.Wrap(err, "failed to get status")
 	}
 
-	content, err := ioutil.ReadAll(br)
-	if err != nil {
-		resp.code = 500
-		// ?? c.close()
-		return resp, errors.Wrap(err, "failed to read response from fastci")
-	}
-
-	resp.body = content
-
 	return resp, nil
-
 }
 
 func statusFromHeaders(h http.Header) (int, error) {
