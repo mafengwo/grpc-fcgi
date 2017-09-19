@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/golang/protobuf/proto"
@@ -133,10 +134,9 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	req.Header.Set("Host", host)
 	req.URL.Host = host
 
-	resp, err := s.client.request(req, s.entryFile)
+	resp, err := s.client.request(req, s.entryFile, nil)
 
 	if err != nil {
-
 		return grpc.Errorf(codes.Internal, "fastcgi request failed: %s", err)
 	}
 
@@ -165,4 +165,25 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	}
 
 	return nil
+}
+
+func (s *Server) passthroughHandle(w http.ResponseWriter, r *http.Request) {
+	env := map[string]string{
+		"DOCUMENT_ROOT":   s.docRoot,
+		"SCRIPT_FILENAME": filepath.Join(s.docRoot, r.URL.Path),
+	}
+	resp, err := s.client.request(r, s.entryFile, env)
+
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.WriteHeader(resp.code)
+	for k, v := range resp.header {
+		for _, val := range v {
+			r.Header.Add(k, val)
+		}
+	}
+	_, _ = w.Write(resp.body)
 }

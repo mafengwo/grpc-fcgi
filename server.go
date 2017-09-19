@@ -10,7 +10,6 @@ import (
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/hkwi/h2c"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -20,14 +19,15 @@ import (
 
 // Server is an http/2 server that proxies to fastcgi
 type Server struct {
-	address      string
-	fastEndpoint string
-	entryFile    string
-	docRoot      string
-	server       *http.Server
-	grpc         *grpc.Server
-	logger       *zap.Logger
-	client       *client
+	address          string
+	fastEndpoint     string
+	entryFile        string
+	docRoot          string
+	server           *http.Server
+	grpc             *grpc.Server
+	logger           *zap.Logger
+	client           *client
+	passthroughPaths []string // paths that we pass through to fastcgi even if not fastcgi
 }
 
 // TODO: TLS support
@@ -115,6 +115,26 @@ func SetEntryFile(f string) func(*Server) error {
 	}
 }
 
+// SetPassthroughPaths creates a function that will set paths
+// that will be passed through to fastcgi, even if not grpc.
+// Generally, used when create a new Server.
+func SetPassthroughPaths(paths []string) func(*Server) error {
+	return func(s *Server) error {
+
+		// a few paths are reserved
+		for _, p := range paths {
+			switch p {
+			case "/metrics":
+				return errors.New("/metrics is used for prometheus metrics")
+			default:
+			}
+		}
+
+		s.passthroughPaths = paths
+		return nil
+	}
+}
+
 // Run starts the server. Generally this never returns.
 func (s *Server) Run() error {
 
@@ -143,7 +163,10 @@ func (s *Server) Run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.Handle("/", runtime.NewServeMux())
+
+	for _, p := range s.passthroughPaths {
+		mux.HandleFunc(p, s.passthroughHandle)
+	}
 
 	l, err := net.Listen("tcp", s.address)
 	if err != nil {

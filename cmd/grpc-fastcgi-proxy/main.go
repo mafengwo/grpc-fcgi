@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	addr    *string
-	fastcgi *string
+	addr             *string
+	fastcgi          *string
+	passthroughPaths []string
 )
 
 var rootCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		proxy.SetFastCGIEndpoint(*fastcgi),
 		proxy.SetLogger(logger),
 		proxy.SetEntryFile(args[0]),
+		proxy.SetPassthroughPaths(passthroughPaths),
 	)
 
 	if err != nil {
@@ -60,9 +62,10 @@ func runServer(cmd *cobra.Command, args []string) {
 }
 
 func main() {
-	addr = rootCmd.PersistentFlags().StringP("address", "a", "127.0.0.1:8080", "listen address")
-	fastcgi = rootCmd.PersistentFlags().StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
-
+	f := rootCmd.PersistentFlags()
+	addr = f.StringP("address", "a", "127.0.0.1:8080", "listen address")
+	fastcgi = f.StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
+	f.StringSliceVar(&passthroughPaths, "passthrough", []string{}, "paths that will be passed through to fastcgi on non-grpc requests")
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)
 	}
