@@ -165,7 +165,7 @@ func (s *Server) Run() error {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	for _, p := range s.passthroughPaths {
-		mux.HandleFunc(p, s.nonGrpcHandle)
+		mux.HandleFunc(p, s.passthroughHandle)
 	}
 
 	l, err := net.Listen("tcp", s.address)

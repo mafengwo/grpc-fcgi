@@ -167,7 +167,7 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	return nil
 }
 
-func (s *Server) nonGrpcHandle(w http.ResponseWriter, r *http.Request) {
+func (s *Server) passthroughHandle(w http.ResponseWriter, r *http.Request) {
 	env := map[string]string{
 		"DOCUMENT_ROOT":   s.docRoot,
 		"SCRIPT_FILENAME": filepath.Join(s.docRoot, r.URL.Path),
