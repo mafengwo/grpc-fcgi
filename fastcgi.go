@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -75,7 +74,7 @@ func (w *clientWrapper) close() {
 	w.FCGIClient = nil
 }
 
-func (c *client) request(r *http.Request, script string) (*fastcgiResponse, error) {
+func (c *client) request(r *http.Request, script string, env map[string]string) (*fastcgiResponse, error) {
 	resp := &fastcgiResponse{}
 	w, err := c.acquireClient()
 	if err != nil {
@@ -85,15 +84,21 @@ func (c *client) request(r *http.Request, script string) (*fastcgiResponse, erro
 	defer c.releaseClient(w)
 
 	params := map[string]string{
-		"SCRIPT_FILENAME": script,
-		"DOCUMENT_ROOT":   filepath.Dir(script),
-		"REQUEST_METHOD":  r.Method,
-		"SERVER_PROTOCOL": fmt.Sprintf("HTTP/%d.%d", r.ProtoMajor, r.ProtoMinor),
-		"HTTP_HOST":       r.Host,
-		"CONTENT_LENGTH":  fmt.Sprintf("%d", r.ContentLength),
-		"CONTENT_TYPE":    r.Header.Get("Content-Type"),
-		"REQUEST_URI":     r.RequestURI,
-		"PATH_INFO":       r.URL.Path,
+		"SCRIPT_FILENAME":   script,
+		"DOCUMENT_ROOT":     c.server.docRoot,
+		"REQUEST_METHOD":    r.Method,
+		"SERVER_PROTOCOL":   fmt.Sprintf("HTTP/%d.%d", r.ProtoMajor, r.ProtoMinor),
+		"HTTP_HOST":         r.Host,
+		"CONTENT_LENGTH":    fmt.Sprintf("%d", r.ContentLength),
+		"CONTENT_TYPE":      r.Header.Get("Content-Type"),
+		"REQUEST_URI":       r.RequestURI,
+		"SCRIPT_NAME":       r.URL.Path,
+		"GATEWAY_INTERFACE": "CGI/1.1",
+		"QUERY_STRING":      r.URL.RawQuery,
+	}
+
+	for k, v := range env {
+		params[k] = v
 	}
 
 	response, err := w.Request(params, r.Body)
