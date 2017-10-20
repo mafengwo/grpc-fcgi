@@ -5,7 +5,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// NewLogger creates a new logger with our prefered options
+// NewLogger creates a new logger with our preferred options
 func NewLogger() (*zap.Logger, error) {
 	config := zap.Config{
 		Development:       false,
