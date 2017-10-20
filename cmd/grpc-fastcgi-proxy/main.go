@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	auxAddr          *string
 	addr             *string
 	fastcgi          *string
 	passthroughPaths []string
@@ -37,6 +38,7 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	s, err := proxy.NewServer(
 		proxy.SetAddress(*addr),
+		proxy.SetAuxAddress(*auxAddr),
 		proxy.SetFastCGIEndpoint(*fastcgi),
 		proxy.SetLogger(logger),
 		proxy.SetEntryFile(args[0]),
@@ -64,8 +66,9 @@ func runServer(cmd *cobra.Command, args []string) {
 func main() {
 	f := rootCmd.PersistentFlags()
 	addr = f.StringP("address", "a", "127.0.0.1:8080", "listen address")
+	auxAddr = f.StringP("aux-address", "x", "127.0.0.1:7070", "aux listen address")
 	fastcgi = f.StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
-	f.StringSliceVar(&passthroughPaths, "passthrough", []string{}, "paths that will be passed through to fastcgi on non-grpc requests")
+	f.StringSliceVar(&passthroughPaths, "passthrough", []string{}, "paths to be passed to fastcgi when accessed on the auxaddress")
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)
 	}
