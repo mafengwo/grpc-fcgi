@@ -62,7 +62,6 @@ It will set the `SCRIPT_FILE` and `DOCUMENT_ROOT` cgi variables.
 
 - general code cleanup
 - convert HTTP status codes to corresponding gRPC error codes
-- add timeouts to the [fcgi client](https://github.com/kellegous/fcgi)
 
 ## License
 
