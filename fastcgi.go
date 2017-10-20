@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	fcgi "github.com/bakins/grpc-fastcgi-proxy/internal/fcgi_client"
@@ -16,11 +16,9 @@ type clientWrapper struct {
 	*fcgi.FCGIClient
 }
 
-type client struct {
-	sync.Mutex
+type fastcgiClientPool struct {
 	addr    string
 	clients chan *clientWrapper
-	server  *Server
 }
 
 type fastcgiResponse struct {
@@ -29,10 +27,9 @@ type fastcgiResponse struct {
 	header http.Header
 }
 
-func newClient(s *Server, addr string, num int) *client {
-	p := &client{
+func newFastcgiClientPool(addr string, num int) *fastcgiClientPool {
+	p := &fastcgiClientPool{
 		addr:    addr,
-		server:  s,
 		clients: make(chan *clientWrapper, num),
 	}
 
@@ -43,7 +40,7 @@ func newClient(s *Server, addr string, num int) *client {
 	return p
 }
 
-func (c *client) acquireClient() (*clientWrapper, error) {
+func (c *fastcgiClientPool) acquireClient() (*clientWrapper, error) {
 	w := <-c.clients
 
 	if w.FCGIClient != nil {
@@ -60,7 +57,7 @@ func (c *client) acquireClient() (*clientWrapper, error) {
 	return w, nil
 }
 
-func (c *client) releaseClient(w *clientWrapper) {
+func (c *fastcgiClientPool) releaseClient(w *clientWrapper) {
 	c.clients <- w
 }
 
@@ -74,7 +71,10 @@ func (w *clientWrapper) close() {
 	w.FCGIClient = nil
 }
 
-func (c *client) request(r *http.Request, script string, env map[string]string) (*fastcgiResponse, error) {
+// we acquire a client, make the request, read the full response, and release the client
+// we do not want to tie up the backend connection for very long.
+
+func (c *fastcgiClientPool) request(r *http.Request, env map[string]string) (*fastcgiResponse, error) {
 	resp := &fastcgiResponse{}
 	w, err := c.acquireClient()
 	if err != nil {
@@ -84,8 +84,6 @@ func (c *client) request(r *http.Request, script string, env map[string]string) 
 	defer c.releaseClient(w)
 
 	params := map[string]string{
-		"SCRIPT_FILENAME":   script,
-		"DOCUMENT_ROOT":     c.server.docRoot,
 		"REQUEST_METHOD":    r.Method,
 		"SERVER_PROTOCOL":   fmt.Sprintf("HTTP/%d.%d", r.ProtoMajor, r.ProtoMinor),
 		"HTTP_HOST":         r.Host,
@@ -97,22 +95,28 @@ func (c *client) request(r *http.Request, script string, env map[string]string) 
 		"QUERY_STRING":      r.URL.RawQuery,
 	}
 
+	for k, v := range r.Header {
+		params["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = v[0]
+	}
+
 	for k, v := range env {
 		params[k] = v
 	}
+
+	delete(params, "HTTP_PROXY")
 
 	response, err := w.Request(params, r.Body)
 	if err != nil {
 		resp.code = 500
 		w.close()
-		return resp, errors.Wrap(err, "failed to make fasctgi request")
+		return resp, errors.Wrap(err, "failed to make fastcgi request")
 	}
 
 	content, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		resp.code = 500
 		w.close()
-		return resp, errors.Wrap(err, "failed to read response from fastci")
+		return resp, errors.Wrap(err, "failed to read response from fastcgi")
 	}
 
 	resp.code = response.StatusCode

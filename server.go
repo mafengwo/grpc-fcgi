@@ -27,16 +27,16 @@ import (
 
 // Server is an http/2 server that proxies to fastcgi
 type Server struct {
-	address      string
-	auxAddress   string
-	fastEndpoint string
-	entryFile    string
-	docRoot      string
-	httpServer   *http.Server
-	grpcServer   *grpc.Server
-	logger       *zap.Logger
-	client       *client
-	auxPaths     map[string]string //paths we will serve on aux port
+	address           string
+	auxAddress        string
+	fastEndpoint      string
+	entryFile         string
+	docRoot           string
+	httpServer        *http.Server
+	grpcServer        *grpc.Server
+	logger            *zap.Logger
+	fastcgiClientPool *fastcgiClientPool
+	auxPaths          map[string]string //paths we will serve on aux port
 }
 
 // TODO: TLS support
@@ -67,7 +67,7 @@ func NewServer(options ...OptionsFunc) (*Server, error) {
 		s.logger = l
 	}
 
-	s.client = newClient(s, s.fastEndpoint, 4)
+	s.fastcgiClientPool = newFastcgiClientPool(s.fastEndpoint, 4)
 
 	return s, nil
 }
