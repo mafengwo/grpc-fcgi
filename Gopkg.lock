@@ -26,28 +26,10 @@
   version = "v1.1"
 
 [[projects]]
-  name = "github.com/grpc-ecosystem/grpc-gateway"
-  packages = ["runtime","runtime/internal","utilities"]
-  revision = "589b126116b5fc961939b3e156c29e4d9d58222f"
-  version = "v1.2.2"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/hkwi/h2c"
-  packages = ["."]
-  revision = "76facb310bcf2b6ab2fd1abc04990a2ba67515e6"
-
-[[projects]]
   name = "github.com/inconshreveable/mousetrap"
   packages = ["."]
   revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
   version = "v1.0"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/kellegous/fcgi"
-  packages = ["."]
-  revision = "7803f11e551bcb62d97d39a3e9bd39be5a732580"
 
 [[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
@@ -123,6 +105,12 @@
 
 [[projects]]
   branch = "master"
+  name = "golang.org/x/sync"
+  packages = ["errgroup"]
+  revision = "8e0aa688b654ef28caa72506fa5ec8dba9fc7690"
+
+[[projects]]
+  branch = "master"
   name = "golang.org/x/text"
   packages = ["internal/gen","internal/triegen","internal/ucd","secure/bidirule","transform","unicode/bidi","unicode/cldr","unicode/norm","unicode/rangetable"]
   revision = "e56139fd9c5bc7244c76116c68e500765bb6db6b"
@@ -142,6 +130,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "4a6b2453fe64596ac45c60ac2120560491bc2f384357db38370d526acfaba833"
+  inputs-digest = "8141b445078f8246105943b3719aff1d42c33f418d3d9bfc27f4161f71326a76"
   solver-name = "gps-cdcl"
   solver-version = 1
