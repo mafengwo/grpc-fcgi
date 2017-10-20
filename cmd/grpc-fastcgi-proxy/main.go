@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -13,10 +14,10 @@ import (
 )
 
 var (
-	auxAddr          *string
-	addr             *string
-	fastcgi          *string
-	passthroughPaths []string
+	auxAddr  *string
+	addr     *string
+	fastcgi  *string
+	auxPaths []string
 )
 
 var rootCmd = &cobra.Command{
@@ -42,8 +43,23 @@ func runServer(cmd *cobra.Command, args []string) {
 		proxy.SetFastCGIEndpoint(*fastcgi),
 		proxy.SetLogger(logger),
 		proxy.SetEntryFile(args[0]),
-		proxy.SetPassthroughPaths(passthroughPaths),
 	)
+
+	for _, val := range auxPaths {
+		parts := strings.SplitN(val, "=", 2)
+		path := parts[0]
+		filename := ""
+		if len(parts) == 2 && parts[1] != "" {
+			filename = parts[1]
+		}
+
+		if err := s.AddAuxPath(path, filename); err != nil {
+			logger.Fatal("failed to add auxillary path",
+				zap.Error(err),
+				zap.String("value", val),
+			)
+		}
+	}
 
 	if err != nil {
 		logger.Fatal("unable to create server", zap.Error(err))
@@ -68,7 +84,7 @@ func main() {
 	addr = f.StringP("address", "a", "127.0.0.1:8080", "listen address")
 	auxAddr = f.StringP("aux-address", "x", "127.0.0.1:7070", "aux listen address")
 	fastcgi = f.StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
-	f.StringSliceVar(&passthroughPaths, "passthrough", []string{}, "paths to be passed to fastcgi when accessed on the auxaddress")
+	f.StringSliceVar(&auxPaths, "aux-path", []string{}, "paths to pass to fastcgi when accessed on the aux port. example: /path=filename")
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)
 	}
