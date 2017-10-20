@@ -153,7 +153,11 @@ func (s *Server) AddAuxPath(path string, filename string) error {
 		filename = filepath.Join(cwd, path)
 	}
 
-	s.auxPaths[path] = filename
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		return errors.Wrapf(err, "unable to determine absolute path of %s", filename)
+	}
+	s.auxPaths[path] = abs
 
 	return nil
 }
