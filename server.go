@@ -232,6 +232,7 @@ func (s *Server) Stop() {
 		s.grpcServer.GracefulStop()
 	}()
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
