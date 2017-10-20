@@ -79,7 +79,7 @@ func (c *client) request(r *http.Request, script string, env map[string]string) 
 	w, err := c.acquireClient()
 	if err != nil {
 		resp.code = 500
-		return resp, errors.Wrap(err, "Failed to acquire client")
+		return resp, errors.Wrap(err, "failed to acquire client")
 	}
 	defer c.releaseClient(w)
 
