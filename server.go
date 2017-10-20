@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"path"
@@ -174,7 +175,10 @@ func (s *Server) Run() error {
 		),
 	)
 
+	// TODO: allow setting these paths and check
+	// that there is no conflict with passthrough paths
 	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/healthz", s.healthz)
 
 	for _, p := range s.passthroughPaths {
 		http.HandleFunc(p, s.passthroughHandle)
@@ -234,4 +238,8 @@ func (s *Server) Stop() {
 	}()
 
 	wg.Wait()
+}
+
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "OK\n")
 }
