@@ -167,23 +167,28 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	return nil
 }
 
-func (s *Server) passthroughHandle(w http.ResponseWriter, r *http.Request) {
-	env := map[string]string{
-		"DOCUMENT_ROOT":   s.docRoot,
-		"SCRIPT_FILENAME": filepath.Join(s.docRoot, r.URL.Path),
-	}
-	resp, err := s.client.request(r, s.entryFile, env)
+func (s *Server) auxPathHandle(path string, filename string) http.Handler {
 
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
+	docroot := filepath.Dir(filename)
 
-	w.WriteHeader(resp.code)
-	for k, v := range resp.header {
-		for _, val := range v {
-			r.Header.Add(k, val)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		env := map[string]string{
+			"DOCUMENT_ROOT":   docroot,
+			"SCRIPT_FILENAME": filename,
 		}
-	}
-	_, _ = w.Write(resp.body)
+		resp, err := s.client.request(r, filename, env)
+
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.WriteHeader(resp.code)
+		for k, v := range resp.header {
+			for _, val := range v {
+				r.Header.Add(k, val)
+			}
+		}
+		_, _ = w.Write(resp.body)
+	})
 }

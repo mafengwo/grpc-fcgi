@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -25,16 +27,16 @@ import (
 
 // Server is an http/2 server that proxies to fastcgi
 type Server struct {
-	address          string
-	auxAddress       string
-	fastEndpoint     string
-	entryFile        string
-	docRoot          string
-	httpServer       *http.Server
-	grpcServer       *grpc.Server
-	logger           *zap.Logger
-	client           *client
-	passthroughPaths []string // paths that we pass through to fastcgi on the auxport
+	address      string
+	auxAddress   string
+	fastEndpoint string
+	entryFile    string
+	docRoot      string
+	httpServer   *http.Server
+	grpcServer   *grpc.Server
+	logger       *zap.Logger
+	client       *client
+	auxPaths     map[string]string //paths we will serve on aux port
 }
 
 // TODO: TLS support
@@ -48,6 +50,7 @@ func NewServer(options ...OptionsFunc) (*Server, error) {
 		address:      "127.0.0.1:8080",
 		auxAddress:   "127.0.0.1:7070",
 		fastEndpoint: "127.0.0.1:9090",
+		auxPaths:     map[string]string{},
 	}
 
 	for _, f := range options {
@@ -136,24 +139,23 @@ func SetEntryFile(f string) func(*Server) error {
 	}
 }
 
-// SetPassthroughPaths creates a function that will set paths
-// that will be passed through to fastcgi when accessed on the aux port.
-// Generally, used when create a new Server.
-func SetPassthroughPaths(paths []string) func(*Server) error {
-	return func(s *Server) error {
-
-		// a few paths are reserved
-		for _, p := range paths {
-			switch p {
-			case "/metrics":
-				return errors.New("/metrics is used for prometheus metrics")
-			default:
-			}
+// AddAuxPath adds a path to be served on the auxillary port.
+// if filename is empty, then the current working directory
+// plus path is used
+func (s *Server) AddAuxPath(path string, filename string) error {
+	// TODO: ensure the path is not registered
+	// either here or by pprof, metrics, etc
+	if filename == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return errors.Wrap(err, "unable to get working directory")
 		}
-
-		s.passthroughPaths = paths
-		return nil
+		filename = filepath.Join(cwd, path)
 	}
+
+	s.auxPaths[path] = filename
+
+	return nil
 }
 
 // Run starts the server. Generally this never returns.
@@ -180,8 +182,8 @@ func (s *Server) Run() error {
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/healthz", s.healthz)
 
-	for _, p := range s.passthroughPaths {
-		http.HandleFunc(p, s.passthroughHandle)
+	for path, filename := range s.auxPaths {
+		http.Handle(path, s.auxPathHandle(path, filename))
 	}
 
 	var g errgroup.Group
