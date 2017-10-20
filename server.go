@@ -1,33 +1,39 @@
 package proxy
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"path"
-	"strings"
+	"sync"
+	"time"
+
+	// For profiling
+	_ "net/http/pprof"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/hkwi/h2c"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
 // Server is an http/2 server that proxies to fastcgi
 type Server struct {
 	address          string
+	auxAddress       string
 	fastEndpoint     string
 	entryFile        string
 	docRoot          string
-	server           *http.Server
-	grpc             *grpc.Server
+	httpServer       *http.Server
+	grpcServer       *grpc.Server
 	logger           *zap.Logger
 	client           *client
-	passthroughPaths []string // paths that we pass through to fastcgi even if not fastcgi
+	passthroughPaths []string // paths that we pass through to fastcgi on the auxport
 }
 
 // TODO: TLS support
@@ -39,15 +45,16 @@ type OptionsFunc func(*Server) error
 func NewServer(options ...OptionsFunc) (*Server, error) {
 	s := &Server{
 		address:      "127.0.0.1:8080",
+		auxAddress:   "127.0.0.1:7070",
 		fastEndpoint: "127.0.0.1:9090",
 	}
 
 	for _, f := range options {
 		if err := f(s); err != nil {
 			return nil, errors.Wrap(err, "options failed")
-
 		}
 	}
+
 	if s.logger == nil {
 		l, err := NewLogger()
 		if err != nil {
@@ -78,6 +85,19 @@ func SetAddress(addr string) func(*Server) error {
 			return errors.Wrapf(err, "failed to parse address: %s", addr)
 		}
 		s.address = a
+		return nil
+	}
+}
+
+// SetAuxAddress creates a function that will set the aux address.
+// Generally, used when create a new Server.
+func SetAuxAddress(addr string) func(*Server) error {
+	return func(s *Server) error {
+		a, err := canonicalizateHostPort(addr)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse address: %s", addr)
+		}
+		s.auxAddress = a
 		return nil
 	}
 }
@@ -116,7 +136,7 @@ func SetEntryFile(f string) func(*Server) error {
 }
 
 // SetPassthroughPaths creates a function that will set paths
-// that will be passed through to fastcgi, even if not grpc.
+// that will be passed through to fastcgi when accessed on the aux port.
 // Generally, used when create a new Server.
 func SetPassthroughPaths(paths []string) func(*Server) error {
 	return func(s *Server) error {
@@ -142,16 +162,9 @@ func (s *Server) Run() error {
 	// TODO - config option for this
 	grpc_prometheus.EnableHandlingTimeHistogram()
 
-	s.grpc = grpc.NewServer(
+	s.grpcServer = grpc.NewServer(
 		grpc.CustomCodec(Codec()),
 		grpc.UnknownServiceHandler(s.streamHandler),
-		grpc.UnaryInterceptor(
-			grpc_middleware.ChainUnaryServer(
-				grpc_prometheus.UnaryServerInterceptor,
-				grpc_zap.UnaryServerInterceptor(s.logger),
-				grpc_recovery.UnaryServerInterceptor(),
-			),
-		),
 		grpc.StreamInterceptor(
 			grpc_middleware.ChainStreamServer(
 				grpc_prometheus.StreamServerInterceptor,
@@ -161,36 +174,64 @@ func (s *Server) Run() error {
 		),
 	)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", promhttp.Handler())
 
 	for _, p := range s.passthroughPaths {
-		mux.HandleFunc(p, s.passthroughHandle)
+		http.HandleFunc(p, s.passthroughHandle)
 	}
 
-	l, err := net.Listen("tcp", s.address)
-	if err != nil {
-		return errors.Wrapf(err, "failed to listen on %s", s.address)
-	}
+	var g errgroup.Group
 
-	s.server = &http.Server{
-		Handler: h2c.Server{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.ProtoMajor == 2 &&
-					strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
-					s.grpc.ServeHTTP(w, r)
-				} else {
-					mux.ServeHTTP(w, r)
-				}
-			}),
-		},
-	}
-
-	if err := s.server.Serve(l); err != nil {
-		if err != http.ErrServerClosed {
-			return errors.Wrap(err, "failed to start http server")
+	g.Go(func() error {
+		l, err := net.Listen("tcp", s.address)
+		if err != nil {
+			return errors.Wrapf(err, "failed to listen on %s", s.address)
 		}
+
+		if err := s.grpcServer.Serve(l); err != nil {
+			if err != http.ErrServerClosed {
+				return errors.Wrapf(err, "failed to server grpc server", s.address)
+			}
+		}
+		return nil
+	})
+
+	s.httpServer = &http.Server{
+		Addr:    s.auxAddress,
+		Handler: http.DefaultServeMux,
 	}
 
+	g.Go(func() error {
+		if err := s.httpServer.ListenAndServe(); err != nil {
+			if err != http.ErrServerClosed {
+				return errors.Wrap(err, "failed to start http server")
+			}
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err == nil {
+		return errors.Wrap(err, "failed to start servers")
+	}
 	return nil
+}
+
+// Stop will stop the server
+func (s *Server) Stop() {
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.grpcServer.GracefulStop()
+	}()
+
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
+		s.httpServer.Shutdown(ctx)
+	}()
+
+	wg.Wait()
 }
