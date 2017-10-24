@@ -83,7 +83,7 @@ func main() {
 	f := rootCmd.PersistentFlags()
 	addr = f.StringP("address", "a", "127.0.0.1:8080", "listen address")
 	auxAddr = f.StringP("aux-address", "x", "127.0.0.1:7070", "aux listen address")
-	fastcgi = f.StringP("fastcgi", "f", "127.0.0.1:9000", "fastcgi to proxy")
+	fastcgi = f.StringP("fastcgi", "f", "tcp://127.0.0.1:9000", "fastcgi to proxy")
 	f.StringSliceVar(&auxPaths, "aux-path", []string{}, "paths to pass to fastcgi when accessed on the aux port. example: /path=filename")
 	if err := rootCmd.Execute(); err != nil {
 		panic(err)
