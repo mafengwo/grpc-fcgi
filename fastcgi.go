@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +18,8 @@ type clientWrapper struct {
 }
 
 type fastcgiClientPool struct {
-	addr    string
-	clients chan *clientWrapper
+	endpoint *url.URL
+	clients  chan *clientWrapper
 }
 
 type fastcgiResponse struct {
@@ -27,10 +28,10 @@ type fastcgiResponse struct {
 	header http.Header
 }
 
-func newFastcgiClientPool(addr string, num int) *fastcgiClientPool {
+func newFastcgiClientPool(endpoint *url.URL, num int) *fastcgiClientPool {
 	p := &fastcgiClientPool{
-		addr:    addr,
-		clients: make(chan *clientWrapper, num),
+		endpoint: endpoint,
+		clients:  make(chan *clientWrapper, num),
 	}
 
 	for i := 0; i < num; i++ {
@@ -47,7 +48,7 @@ func (c *fastcgiClientPool) acquireClient() (*clientWrapper, error) {
 		return w, nil
 	}
 
-	f, err := fcgi.DialTimeout("tcp", c.addr, 3*time.Second)
+	f, err := fcgi.DialTimeout(c.endpoint.Scheme, c.endpoint.Host, 3*time.Second)
 	if err != nil {
 		return nil, errors.Wrap(err, "dial failed")
 	}
