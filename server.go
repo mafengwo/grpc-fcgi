@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -29,7 +30,7 @@ import (
 type Server struct {
 	address           string
 	auxAddress        string
-	fastEndpoint      string
+	fastEndpoint      *url.URL
 	entryFile         string
 	docRoot           string
 	httpServer        *http.Server
@@ -47,10 +48,13 @@ type OptionsFunc func(*Server) error
 // NewServer creates a new Server.
 func NewServer(options ...OptionsFunc) (*Server, error) {
 	s := &Server{
-		address:      "127.0.0.1:8080",
-		auxAddress:   "127.0.0.1:7070",
-		fastEndpoint: "127.0.0.1:9090",
-		auxPaths:     map[string]string{},
+		address:    "127.0.0.1:8080",
+		auxAddress: "127.0.0.1:7070",
+		fastEndpoint: &url.URL{
+			Scheme: "tcp",
+			Host:   "127.0.0.1:9090",
+		},
+		auxPaths: map[string]string{},
 	}
 
 	for _, f := range options {
@@ -107,15 +111,18 @@ func SetAuxAddress(addr string) func(*Server) error {
 }
 
 // SetFastCGIEndpoint creates a function that will set the fastCGI endpoint
-// to proxy.
+// to proxy. Endpoint should be url.
+// Default is tcp://127.0.0.1:9090
 // Generally, used when create a new Server.
-func SetFastCGIEndpoint(addr string) func(*Server) error {
+func SetFastCGIEndpoint(endpoint string) func(*Server) error {
 	return func(s *Server) error {
-		a, err := canonicalizateHostPort(addr)
+		u, err := url.Parse(endpoint)
 		if err != nil {
-			return errors.Wrapf(err, "failed to parse address: %s", addr)
+			return errors.Wrapf(err, "failed to parse endpoint: %s", endpoint)
 		}
-		s.fastEndpoint = a
+
+		//XXX: if using tcp, ensure we have a host and port?
+		s.fastEndpoint = u
 		return nil
 	}
 }
