@@ -54,7 +54,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		if err := s.AddAuxPath(path, filename); err != nil {
-			logger.Fatal("failed to add auxillary path",
+			logger.Fatal("failed to add auxiliary path",
 				zap.Error(err),
 				zap.String("value", val),
 			)

@@ -1,0 +1,3 @@
+#!/bin/bash
+set -eux
+gometalinter --config=./script/gometalinter.json ./...

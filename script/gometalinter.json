@@ -1,0 +1,24 @@
+{
+    "deadline": "60s",
+    "enable": [
+        "golint",
+        "vet",
+        "vetshadow",
+        "deadcode",
+        "errcheck",
+        "gas",
+        "goconst",
+        "goimports",
+        "gosimple",
+        "ineffassign",
+        "misspell",
+        "nakedret",
+        "structcheck",
+        "unused"
+    ],
+    "exclude": [
+        ".*internal/fcgi_client.*"
+    ],
+    "test": true,
+    "vendor": true
+}

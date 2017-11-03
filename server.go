@@ -146,7 +146,7 @@ func SetEntryFile(f string) func(*Server) error {
 	}
 }
 
-// AddAuxPath adds a path to be served on the auxillary port.
+// AddAuxPath adds a path to be served on the auxiliary port.
 // if filename is empty, then the current working directory
 // plus path is used
 func (s *Server) AddAuxPath(path string, filename string) error {
