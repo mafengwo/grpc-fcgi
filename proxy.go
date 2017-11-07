@@ -70,12 +70,11 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	req.Header.Set("Host", host)
 	req.URL.Host = host
 
-	env := map[string]string{
-		"DOCUMENT_ROOT":   s.docRoot,
-		"SCRIPT_FILENAME": s.entryFile,
-	}
+	params := paramsFromRequest(req)
+	params["DOCUMENT_ROOT"] = s.docRoot
+	params["SCRIPT_FILENAME"] = s.entryFile
 
-	resp, err := s.fastcgiClientPool.request(req, env)
+	resp, err := s.fastcgiClientPool.request(req, params)
 
 	if err != nil {
 		return grpc.Errorf(codes.Internal, "fastcgi request failed: %s", err)
@@ -108,16 +107,16 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	return nil
 }
 
-func (s *Server) auxPathHandle(path string, filename string) http.Handler {
+func (s *Server) auxPathHandle(filename string) http.Handler {
 
 	docroot := filepath.Dir(filename)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		env := map[string]string{
-			"DOCUMENT_ROOT":   docroot,
-			"SCRIPT_FILENAME": filename,
-		}
-		resp, err := s.fastcgiClientPool.request(r, env)
+		params := paramsFromRequest(r)
+		params["DOCUMENT_ROOT"] = docroot
+		params["SCRIPT_FILENAME"] = filename
+
+		resp, err := s.fastcgiClientPool.request(r, params)
 
 		if err != nil {
 			http.Error(w, err.Error(), 500)
