@@ -72,18 +72,7 @@ func (w *clientWrapper) close() {
 	w.FCGIClient = nil
 }
 
-// we acquire a client, make the request, read the full response, and release the client
-// we do not want to tie up the backend connection for very long.
-
-func (c *fastcgiClientPool) request(r *http.Request, env map[string]string) (*fastcgiResponse, error) {
-	resp := &fastcgiResponse{}
-	w, err := c.acquireClient()
-	if err != nil {
-		resp.code = 500
-		return resp, errors.Wrap(err, "failed to acquire client")
-	}
-	defer c.releaseClient(w)
-
+func paramsFromRequest(r *http.Request) map[string]string {
 	params := map[string]string{
 		"REQUEST_METHOD":    r.Method,
 		"SERVER_PROTOCOL":   fmt.Sprintf("HTTP/%d.%d", r.ProtoMajor, r.ProtoMinor),
@@ -100,9 +89,20 @@ func (c *fastcgiClientPool) request(r *http.Request, env map[string]string) (*fa
 		params["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = v[0]
 	}
 
-	for k, v := range env {
-		params[k] = v
+	return params
+}
+
+// we acquire a client, make the request, read the full response, and release the client
+// we do not want to tie up the backend connection for very long.
+
+func (c *fastcgiClientPool) request(r *http.Request, params map[string]string) (*fastcgiResponse, error) {
+	resp := &fastcgiResponse{}
+	w, err := c.acquireClient()
+	if err != nil {
+		resp.code = 500
+		return resp, errors.Wrap(err, "failed to acquire client")
 	}
+	defer c.releaseClient(w)
 
 	delete(params, "HTTP_PROXY")
 

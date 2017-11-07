@@ -194,7 +194,7 @@ func (s *Server) Run() error {
 	http.HandleFunc("/healthz", s.healthz)
 
 	for path, filename := range s.auxPaths {
-		http.Handle(path, s.auxPathHandle(path, filename))
+		http.Handle(path, s.auxPathHandle(filename))
 	}
 
 	var g errgroup.Group
