@@ -15,6 +15,7 @@ import (
 	// For profiling
 	_ "net/http/pprof"
 
+	"github.com/bakins/grpc-fastcgi-proxy/internal/errgroup"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -22,7 +23,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
@@ -197,7 +197,7 @@ func (s *Server) Run() error {
 		http.Handle(path, s.auxPathHandle(filename))
 	}
 
-	var g errgroup.Group
+	g := errgroup.New()
 
 	g.Go(func() error {
 		l, err := net.Listen("tcp", s.address)
