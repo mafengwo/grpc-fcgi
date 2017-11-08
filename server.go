@@ -40,8 +40,6 @@ type Server struct {
 	auxPaths          map[string]string //paths we will serve on aux port
 }
 
-// TODO: TLS support
-
 // OptionsFunc is a function passed to New to set options.
 type OptionsFunc func(*Server) error
 
