@@ -79,7 +79,7 @@ func paramsFromRequest(r *http.Request) map[string]string {
 		"HTTP_HOST":         r.Host,
 		"CONTENT_LENGTH":    fmt.Sprintf("%d", r.ContentLength),
 		"CONTENT_TYPE":      r.Header.Get("Content-Type"),
-		"REQUEST_URI":       r.RequestURI,
+		"REQUEST_URI":       r.URL.Path,
 		"SCRIPT_NAME":       r.URL.Path,
 		"GATEWAY_INTERFACE": "CGI/1.1",
 		"QUERY_STRING":      r.URL.RawQuery,
