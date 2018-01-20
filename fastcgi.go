@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	fcgi "github.com/bakins/grpc-fastcgi-proxy/internal/fcgi_client"
+	fcgi "github.com/bakins/grpc-fastcgi-proxy/internal/fcgiclient"
 	"github.com/pkg/errors"
 )
 
@@ -48,7 +48,15 @@ func (c *fastcgiClientPool) acquireClient() (*clientWrapper, error) {
 		return w, nil
 	}
 
+<<<<<<< Updated upstream
 	f, err := fcgi.DialTimeout(c.endpoint.Scheme, c.endpoint.Host, 3*time.Second)
+=======
+	f, err := fcgi.Dial("tcp", c.addr,
+		fcgi.WithConnectTimeout(3*time.Second),
+		fcgi.WithKeepalive(true),
+	)
+
+>>>>>>> Stashed changes
 	if err != nil {
 		return nil, errors.Wrap(err, "dial failed")
 	}
