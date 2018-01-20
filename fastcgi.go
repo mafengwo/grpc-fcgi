@@ -48,15 +48,11 @@ func (c *fastcgiClientPool) acquireClient() (*clientWrapper, error) {
 		return w, nil
 	}
 
-<<<<<<< Updated upstream
-	f, err := fcgi.DialTimeout(c.endpoint.Scheme, c.endpoint.Host, 3*time.Second)
-=======
-	f, err := fcgi.Dial("tcp", c.addr,
+	f, err := fcgi.Dial(c.endpoint.Scheme, c.endpoint.Host,
 		fcgi.WithConnectTimeout(3*time.Second),
 		fcgi.WithKeepalive(true),
 	)
 
->>>>>>> Stashed changes
 	if err != nil {
 		return nil, errors.Wrap(err, "dial failed")
 	}
