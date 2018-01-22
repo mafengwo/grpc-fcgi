@@ -15,6 +15,9 @@ import (
 	// For profiling
 	_ "net/http/pprof"
 
+	// To register gzip compressor
+	_ "google.golang.org/grpc/encoding/gzip"
+
 	"github.com/bakins/grpc-fastcgi-proxy/internal/errgroup"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
