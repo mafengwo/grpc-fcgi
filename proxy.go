@@ -15,13 +15,30 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/transport"
 )
 
+func addRequestHeaders(md metadata.MD, req *http.Request) {
+	host := "localhost"
+
+	for k, v := range md {
+		if k == ":authority" && len(v) != 0 {
+			host = v[0]
+		} else {
+			for _, val := range v {
+				req.Header.Add(k, val)
+			}
+		}
+	}
+	req.Host = host
+	req.Header.Set("Host", host)
+	req.URL.Host = host
+}
 func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error {
 	lowLevelServerStream, ok := transport.StreamFromContext(stream.Context())
 	if !ok {
-		return grpc.Errorf(codes.Internal, "lowLevelServerStream does not exist in context")
+		return status.Errorf(codes.Internal, "lowLevelServerStream does not exist in context")
 	}
 
 	fullMethodName := lowLevelServerStream.Method()
@@ -31,11 +48,11 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 
 	f := &frame{}
 	if err := stream.RecvMsg(f); err != nil {
-		return grpc.Errorf(codes.Internal, "RecvMsg failed: %s", err)
+		return status.Errorf(codes.Internal, "RecvMsg failed: %s", err)
 	}
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
-		return grpc.Errorf(codes.Internal, "failed to extract metadata")
+		return status.Errorf(codes.Internal, "failed to extract metadata")
 	}
 
 	req := &http.Request{
@@ -54,21 +71,7 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 
 	req = req.WithContext(clientCtx)
 
-	host := "localhost"
-
-	for k, v := range md {
-		if k == ":authority" && len(v) != 0 {
-			host = v[0]
-		} else {
-			for _, val := range v {
-				req.Header.Add(k, val)
-			}
-		}
-	}
-
-	req.Host = host
-	req.Header.Set("Host", host)
-	req.URL.Host = host
+	addRequestHeaders(md, req)
 
 	params := paramsFromRequest(req)
 	params["DOCUMENT_ROOT"] = s.docRoot
@@ -77,12 +80,12 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	resp, err := s.fastcgiClientPool.request(req, params)
 
 	if err != nil {
-		return grpc.Errorf(codes.Internal, "fastcgi request failed: %s", err)
+		return status.Errorf(codes.Internal, "fastcgi request failed: %s", err)
 	}
 
 	// TODO: convert resp code to grpc code
 	if resp.code != http.StatusOK {
-		return grpc.Errorf(codes.Internal, string(resp.body))
+		return status.Errorf(codes.Internal, string(resp.body))
 	}
 
 	responseFrame := frame{
@@ -97,11 +100,11 @@ func (s *Server) streamHandler(srv interface{}, stream grpc.ServerStream) error 
 	}
 
 	if err := stream.SendHeader(responseMetadata); err != nil {
-		return grpc.Errorf(codes.Internal, "failed to send headers: %s", err)
+		return status.Errorf(codes.Internal, "failed to send headers: %s", err)
 	}
 
 	if err := stream.SendMsg(&responseFrame); err != nil {
-		return grpc.Errorf(codes.Internal, "failed to send message: %s", err)
+		return status.Errorf(codes.Internal, "failed to send message: %s", err)
 	}
 
 	return nil
