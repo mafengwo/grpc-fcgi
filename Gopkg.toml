@@ -44,3 +44,15 @@
 [[constraint]]
   name = "google.golang.org/grpc"
   version = "1.5.2"
+
+[[constraint]]
+  name = "github.com/go-ini/ini"
+  version = "1.39.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/jinzhu/configor"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/kellegous/fcgi"

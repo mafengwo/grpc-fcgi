@@ -1,2 +1,4 @@
 /grpc-fastcgi-proxy
 /grpc-fastcgi-proxy.*
+.idea
+vendor
