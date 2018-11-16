@@ -1,9 +1,8 @@
-package fcgiclient
+package fastcgi
 
 import (
 	"github.com/pkg/errors"
 	"net/http"
-	"net/url"
 )
 
 type clientWrapper struct {
@@ -12,16 +11,14 @@ type clientWrapper struct {
 
 type ClientFactory func() *Client
 
-type FastcgiClientPool struct {
-	endpoint *url.URL
-
+type ClientPool struct {
 	clients       chan *clientWrapper
 	size          int
 	clientFactory ClientFactory
 }
 
-func NewFastcgiClientPool(size int, factory ClientFactory) *FastcgiClientPool {
-	p := &FastcgiClientPool{
+func NewFastcgiClientPool(size int, factory ClientFactory) *ClientPool {
+	p := &ClientPool{
 		size:          size,
 		clientFactory: factory,
 		clients:       make(chan *clientWrapper, size),
@@ -34,7 +31,7 @@ func NewFastcgiClientPool(size int, factory ClientFactory) *FastcgiClientPool {
 	return p
 }
 
-func (c *FastcgiClientPool) acquireClient() (*clientWrapper, error) {
+func (c *ClientPool) acquireClient() (*clientWrapper, error) {
 	w := <-c.clients
 
 	if w.Client != nil {
@@ -46,7 +43,7 @@ func (c *FastcgiClientPool) acquireClient() (*clientWrapper, error) {
 	return w, nil
 }
 
-func (c *FastcgiClientPool) releaseClient(w *clientWrapper) {
+func (c *ClientPool) releaseClient(w *clientWrapper) {
 	c.clients <- w
 }
 
@@ -61,17 +58,17 @@ func (w *clientWrapper) close() {
 // we acquire a client, make the request, read the full response, and release the client
 // we do not want to tie up the backend connection for very long.
 
-func (c *FastcgiClientPool) Request(p map[string][]string, req SizedReader) ([]byte, http.Header, error) {
+func (c *ClientPool) Send(header map[string][]string, body SizedReader) (respHeader http.Header, respBody []byte, err error) {
 	w, err := c.acquireClient()
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to acquire client")
 	}
 	defer c.releaseClient(w)
 
-	body, header, err := w.Send(p, req)
+	respHeader, respBody, err = w.Send(header, body)
 	if err != nil {
 		w.close()
 		return nil, nil, errors.Wrap(err, "failed to make fastcgi request")
 	}
-	return body, header, err
+	return respHeader, respBody, err
 }
