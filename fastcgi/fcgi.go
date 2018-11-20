@@ -126,7 +126,7 @@ func writeParams(c net.Conn, w *buffer, id uint16, params map[string][]string) e
 
 // Copy the data from the given reader into the connection as stdin. Note that
 // this may fragment the data into multiple writes.
-func writeStdin(c net.Conn, w *buffer, id uint16, r io.Reader) error {
+func writeStdin(c io.Writer, w *buffer, id uint16, r io.Reader) error {
 	if r != nil {
 		for {
 			err := w.CopyFrom(r)

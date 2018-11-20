@@ -54,7 +54,7 @@ const (
 )
 
 // Write the beginning of a request into the given connection.
-func writeBeginReq(c net.Conn, w *buffer, id uint16) error {
+func writeBeginReq(c io.Writer, w *buffer, id uint16) error {
 	binary.Write(w, binary.BigEndian, roleResponder) // role
 	binary.Write(w, binary.BigEndian, flagKeepConn)  // flags
 	w.Write([]byte{0, 0, 0, 0, 0})                   // reserved
@@ -81,7 +81,7 @@ func encodeLength(b []byte, n uint32) int {
 
 // Encode and write the given parameters into the connection. Note that the headers
 // may be fragmented into several writes if they will not fit into a single write.
-func writeParams(c net.Conn, w *buffer, id uint16, params map[string][]string) error {
+func writeParams(c io.Writer, w *buffer, id uint16, params map[string][]string) error {
 	var b [8]byte
 	for key, vals := range params {
 		for _, val := range vals {
@@ -126,7 +126,7 @@ func writeParams(c net.Conn, w *buffer, id uint16, params map[string][]string) e
 
 // Copy the data from the given reader into the connection as stdin. Note that
 // this may fragment the data into multiple writes.
-func writeStdin(c net.Conn, w *buffer, id uint16, r io.Reader) error {
+func writeStdin(c io.Writer, w *buffer, id uint16, r io.Reader) error {
 	if r != nil {
 		for {
 			err := w.CopyFrom(r)

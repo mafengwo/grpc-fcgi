@@ -3,44 +3,30 @@ package fcgi
 import (
 	"bufio"
 	"context"
-	"errors"
-	"io"
+	"fmt"
 	"net"
 	"sync"
 )
 
-type connAndRequestCount struct {
-	*persistConn
-	usedCount    int
-	maxUsedTimes int
-
-	mu sync.Mutex
-}
-
-func (c *connAndRequestCount) hasRemains() bool {
-
-}
-
-func (c *connAndRequestCount) incUsedCount() {
-
-}
-
-func (c *connAndRequestCount) decUsedCount() {
-
-}
-
 type Transport struct {
-	idleConnCh chan *connAndRequestCount
+	idleConnCh chan *persistConn
+	idleMu     sync.Mutex
+	idleConn   []*persistConn
 
-	MaxRequestPerConn int
-	MaxConns          int
+	MaxConn int
 
-	Dial func(network, addr string) (net.Conn, error)
+	Address string
+	Dial    func(network, addr string) (net.Conn, error)
+
+	connCountMu   sync.Mutex
+	connCount     int
+	connAvailable chan struct{}
 }
 
-func (t *Transport) roundTrip(req *Request) (*Response, error) {
+func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 	for {
-		conn, err := t.getConn(ctx)
+		//TODO context.Done()
+		conn, err := t.getConn(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -64,17 +50,113 @@ func shouldRetryRequest(req *Request, err error) bool {
 	return false
 }
 
-func (t *Transport) getConn(ctx context.Context) (*connAndRequestCount, error) {
+func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
+	// get idle connection
+	if pc := t.getIdleConn(); pc != nil {
+		fmt.Println("got idle conn")
+		return pc, nil
+	}
+
+	if t.MaxConn > 0 {
+		select {
+		case <-t.incConnCount():
+			fmt.Println("count below limit")
+			// count below conn limit; proceed
+		case pc := <-t.getIdleConnCh():
+			return pc, nil
+		}
+	}
+
+	// dial new connection if no idle connection available
+	type dialRes struct {
+		pc  *persistConn
+		err error
+	}
+	dialc := make(chan dialRes)
+	go func() {
+		pc, err := t.dialConn(ctx)
+		dialc <- dialRes{pc, err}
+	}()
+
+	handlePendingDial := func() {
+		go func() {
+			if v := <-dialc; v.err == nil {
+				t.putIdleConn(v.pc)
+			} else {
+				t.decConnCount()
+			}
+		}()
+	}
+
 	select {
-	case c := <-t.idleConnCh:
-		return c, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case ds := <-dialc:
+		fmt.Println("dialed")
+		if ds.err!= nil {
+			// Once dial failed. decrement the connection count
+			t.decConnCount()
+		}
+		return ds.pc, ds.err
+	case pc := <-t.getIdleConnCh():
+		// Another request finished first and its net.Conn
+		// became available before our dial. Or somebody
+		// else's dial that they didn't use.
+		// But our dial is still going, so give it away
+		// when it finishes:
+		fmt.Println("got idle conn ch")
+		handlePendingDial()
+		return pc, nil
 	}
 }
 
-func (t *Transport) dialConn(ctx context.Context) (*connAndRequestCount, error) {
+func (t *Transport) getIdleConnCh() chan *persistConn {
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+
+	if t.idleConnCh == nil {
+		t.idleConnCh = make(chan *persistConn)
+	}
+
+	return t.idleConnCh
+}
+
+func (t *Transport) getIdleConn() *persistConn {
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+
+	if t.idleConn == nil || len(t.idleConn) == 0 {
+		return nil
+	}
+
+	t.idleConn = t.idleConn[:len(t.idleConn)-1]
+	return t.idleConn[len(t.idleConn)-1]
+}
+
+func (t *Transport) putIdleConn(pc *persistConn) {
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+
+	select {
+	case t.getIdleConnCh() <- pc:
+		// Done here means somebody is currently waiting,
+		// conn cannot put in idleConn in this situation
+		return
+	default:
+	}
+
+	if t.idleConn == nil {
+		t.idleConn = []*persistConn{}
+	}
+	t.idleConn = append(t.idleConn, pc)
+}
+
+func (t *Transport) dialConn(ctx context.Context) (*persistConn, error) {
+	netconn, err := t.Dial("tcp", t.Address)
+	if err != nil {
+		return nil, err
+	}
+
 	conn := &persistConn{
+		conn:                 netconn,
 		numExpectedResponses: 0,
 		reqch:                make(chan requestAndChan, 1),
 		writech:              make(chan writeRequestAndError, 1),
@@ -87,121 +169,59 @@ func (t *Transport) dialConn(ctx context.Context) (*connAndRequestCount, error) 
 
 	go conn.readLoop()
 	go conn.writeLoop()
+	go func() {
+		<-conn.closech
+		t.decConnCount()
+	}()
 
-	return &connAndRequestCount{
-		persistConn:  conn,
-		usedCount:    0,
-		maxUsedTimes: t.MaxRequestPerConn,
-	}, nil
+	return conn, nil
 }
 
-type responseAndError struct {
-	res *Response
-	err error
-}
+var closedCh = make(chan struct{})
 
-type requestAndChan struct {
-	req        *Request
-	ch         chan responseAndError
-	callerGone chan<- struct{}
-}
-
-type writeRequestAndError struct {
-	req *Request
-	ch  chan<- error
-}
-
-// persistConn wraps a connection, usually a persistent one
-type persistConn struct {
-	conn net.Conn
-
-	mu                   sync.Mutex
-	numExpectedResponses int
-	reqch                chan requestAndChan
-	writech              chan writeRequestAndError
-	closech              chan struct{}
-	writeErrCh           chan error
-	writeLoopDone        chan struct{}
-	sawEOF               bool
-
-	nwrite int64 // bytes written
-
-	br *bufio.Reader // from conn
-	bw *bufio.Writer // to conn
-}
-
-
-// only one request on-flight at most
-func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
-	// write into write channel to be consumed by writeLoop
-	writeErrCh := make(chan error, 1)
-	pc.writech <- writeRequestAndError{req, writeErrCh}
-
-	// record request-response
-	resc := make(chan responseAndError)
-	pc.reqch <- requestAndChan{
-		req: req,
-		ch:  resc,
+// incConnCount increments the count of connections.
+// It returns an already-closed channel if the count
+// is not at its limit; otherwise it returns a channel which is
+// notified when the count is below the limit.
+func (t *Transport) incConnCount() <-chan struct{} {
+	if t.MaxConn <= 0 {
+		return closedCh
 	}
 
-	startBytesWritten := pc.nwrite
+	t.connCountMu.Lock()
+	defer t.connCountMu.Unlock()
 
-	//TODO timer
-	for {
-		select {
-		case err := <-writeErrCh: // write done
-			if err != nil {
-				return nil, err
-			}
-		case <-pc.closech: // connection closed
-			return nil, errors.New("")
-		case re := <-resc: // response received
-			return re.res, re.err
+	if t.connCount == t.MaxConn {
+		if t.connAvailable == nil {
+			t.connAvailable = make(chan struct{})
+		}
+		return t.connAvailable
+	}
+
+	t.connCount++
+
+	return closedCh
+}
+
+func (t *Transport) decConnCount() {
+	if t.MaxConn <= 0 {
+		return
+	}
+
+	t.connCountMu.Lock()
+	defer t.connCountMu.Unlock()
+
+	t.connCount--
+
+	select {
+	case t.connAvailable <- struct{}{}:
+	default:
+		if t.connAvailable != nil {
+			close(t.connAvailable)
 		}
 	}
 }
 
-func (pc *persistConn) readLoop() {
-	alive := true
-	for alive {
-		_, err := pc.br.Peek(1)
-
-		rc := <-pc.reqch
-		var resp *Response
-		if err == nil {
-			resp, err = readResponse(pc.br)
-		}
-		rc.ch <- responseAndError{res: resp, err: err}
-
-		alive = alive && !pc.sawEOF
-	}
-}
-
-func (pc *persistConn) writeLoop() {
-	for {
-		select {
-		case wr := <-pc.writech:
-			err := wr.req.write(pc.bw)
-			if err == nil {
-				pc.bw.Flush()
-			}
-			wr.ch <- err
-		case <-pc.closech: // to avoid goroutine running background on a closed conn
-			return
-		}
-	}
-}
-
-func (pc *persistConn) Write(p []byte) (n int, err error) {
-	n, err = pc.conn.Write(p)
-	pc.nwrite += int64(n)
-	return
-}
-
-func (pc *persistConn) Read(p []byte) (n int, err error) {
-	n, err = pc.conn.Read(p)
-	if err == io.EOF {
-		pc.sawEOF = true
-	}
-	return
+func init() {
+	close(closedCh)
 }

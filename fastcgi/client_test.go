@@ -21,13 +21,15 @@ var (
 )
 
 func Test_Client2Request(t *testing.T) {
-	header, body, err := cli.Send(newTestParams2(), bytes.NewReader([]byte{0x01}))
-	if err != nil {
-		t.Errorf("request error: %v", err)
-	}
+	for i := 0; i < 10; i++ {
+		header, body, err := cli.Send(newTestParams2(), bytes.NewReader([]byte{0x01}))
+		if err != nil {
+			t.Errorf("request error: %v", err)
+		}
 
-	hjson, _ := json.MarshalIndent(header, "", "    ")
-	t.Logf("header:%s\nbody:%s\n", hjson, body)
+		hjson, _ := json.MarshalIndent(header, "", "    ")
+		t.Logf("header:%s\nbody:%s\n", hjson, body)
+	}
 }
 
 func newTestParams2() map[string][]string {

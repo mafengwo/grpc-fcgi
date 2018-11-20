@@ -31,13 +31,15 @@ func Test_Request(t *testing.T) {
 	} else {
 		t.Log("dial success\n")
 	}
-	h, body, err := cli.Request(newTestParams(), strings.NewReader(" "))
-	if err != nil {
-		t.Errorf("request error: %v", err)
-	}
+	for i := 0; i < 10; i++ {
+		h, body, err := cli.Request(newTestParams(), strings.NewReader(" "))
+		if err != nil {
+			t.Errorf("request error: %v", err)
+		}
 
-	headerJson, _ := json.MarshalIndent(h, "", "    ")
-	t.Logf("header:%s\nbody:%s\n", headerJson, body)
+		headerJson, _ := json.MarshalIndent(h, "", "    ")
+		t.Logf("header:%s\nbody:%s\n", headerJson, body)
+	}
 }
 
 func newTestParams() http.Header {

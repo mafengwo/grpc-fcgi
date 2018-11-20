@@ -1,8 +1,8 @@
 package fcgi
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"github.com/pkg/errors"
@@ -13,8 +13,8 @@ import (
 )
 
 type Response struct {
-	Headers map[string][]string
-	Body []byte
+	Headers      map[string][]string
+	Body         []byte
 	ErrorMessage []byte
 }
 
@@ -36,20 +36,23 @@ func readResponse(c io.Reader) (*Response, error) {
 		buf = buf[:h.ContentLength]
 		switch h.Type {
 		case typeStdout:
+			fmt.Println("stdout")
 			if _, err := stdout.Write(buf); err != nil {
 				return nil, err
 			}
 		case typeStderr:
+			fmt.Println("stderr")
 			if _, err := stderr.Write(buf); err != nil {
 				return nil, err
 			}
 		case typeEndRequest:
-			break
+			fmt.Println("endrequest")
+			goto PARSE
 		default:
 			return nil, fmt.Errorf("unexpected type: %d", h.Type)
 		}
 	}
-
+PARSE:
 	rb := bufio.NewReader(stdout)
 	tp := textproto.NewReader(rb)
 
@@ -82,9 +85,8 @@ func readResponse(c io.Reader) (*Response, error) {
 	}
 
 	return &Response{
-		Headers: mimeHeader,
-		Body: body,
+		Headers:      mimeHeader,
+		Body:         body,
 		ErrorMessage: errmsg,
 	}, nil
 }
-
