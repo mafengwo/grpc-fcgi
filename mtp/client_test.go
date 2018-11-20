@@ -21,6 +21,16 @@ func Test_Request(t *testing.T) {
 		t.Fatalf("dial failed: %v", err)
 	}
 
+	cli, err = Dial("tcp", "127.0.0.1:9000",
+		WithConnectTimeout(time.Second),
+		WithKeepalive(true),
+	)
+	if err != nil {
+		t.Fatalf("dial fail: %v\n", err)
+		return
+	} else {
+		t.Log("dial success\n")
+	}
 	h, body, err := cli.Request(newTestParams(), strings.NewReader(" "))
 	if err != nil {
 		t.Errorf("request error: %v", err)

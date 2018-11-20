@@ -1,6 +1,7 @@
 package fastcgi
 
 import (
+	"io"
 	"net"
 	"time"
 )
@@ -8,6 +9,13 @@ import (
 type conn struct {
 	net.Conn
 	timeout time.Duration
+
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+
+	stdin  io.Reader
+	stderr io.ReadWriteCloser
+	stdout io.ReadWriteCloser
 }
 
 // Write ...

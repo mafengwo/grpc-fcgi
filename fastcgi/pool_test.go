@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	pool = NewFastcgiClientPool(4, factory)
+	pool = NewFastcgiClientPool(3, factory)
 )
 
 func Test_PoolSend(t *testing.T) {
@@ -56,12 +56,19 @@ func BenchmarkClientPool_SendLoop(b *testing.B) {
 	}
 }
 
+func Test_PhpFpmConnectionLimit(t *testing.T) {
+	_, err := dial("tcp", "127.0.0.1:9000", time.Second, time.Second)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+}
+
 func factory() *Client {
 	conf := &ClientConfig{
 		Net:         "tcp",
 		Addr:        "127.0.0.1:9000",
-		DialTimeout: time.Second,
-		Timeout:     time.Second,
+		DialTimeout: time.Second * 60,
+		Timeout:     time.Second * 60,
 	}
 	return NewClient(conf)
 }

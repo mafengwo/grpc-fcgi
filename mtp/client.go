@@ -147,7 +147,9 @@ func Dial(network, address string, options ...DialOption) (*Client, error) {
 		}
 	}
 
+	fmt.Printf("prepare dial: %v\n", f.connectTimeout)
 	conn, err := net.DialTimeout(network, address, f.connectTimeout)
+	fmt.Printf("prepare timeout:%v\n", err)
 	if err != nil {
 		return nil, errors.Wrap(err, "Dial failed")
 	}
@@ -192,7 +194,6 @@ func (this *Client) writeRecord(recType uint8, content []byte) (err error) {
 	if _, err := this.buf.Write(pad[:this.h.PaddingLength]); err != nil {
 		return err
 	}
-	fmt.Println("Header:")
 	_, err = this.rwc.Write(this.buf.Bytes())
 	return err
 }

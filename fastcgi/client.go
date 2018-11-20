@@ -34,17 +34,25 @@ func NewClient(conf *ClientConfig) (*Client) {
 	return c
 }
 
+func(c *Client) dialOnce() error {
+	if c.conn == nil {
+		conn, err := dial(c.config.Net, c.config.Addr, c.config.DialTimeout, c.config.Timeout)
+		if err != nil {
+			return err
+		}
+		c.conn = conn
+	}
+	return nil
+}
+
 type SizedReader interface {
 	io.Reader
 	Size() int64
 }
 
 func (c *Client) Send(params map[string][]string, body SizedReader) (respHeader http.Header, respBody []byte, err error) {
-	if c.conn == nil {
-		c.conn, err = dial(c.config.Net, c.config.Addr, c.config.DialTimeout, c.config.Timeout)
-		if err != nil {
-			return
-		}
+	if err = c.dialOnce(); err != nil {
+		return
 	}
 
 	var buf buffer

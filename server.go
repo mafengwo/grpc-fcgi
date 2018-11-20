@@ -27,12 +27,12 @@ import (
 // Server is an http/2 server that proxies to fastcgi
 type Server struct {
 	/*
-	address           string
-	auxAddress        string
-	fastEndpoint      *url.URL
-	entryFile         string
-	docRoot           string
-	auxPaths          map[string]string //paths we will serve on aux port
+		address           string
+		auxAddress        string
+		fastEndpoint      *url.URL
+		entryFile         string
+		docRoot           string
+		auxPaths          map[string]string //paths we will serve on aux port
 	*/
 
 	options Options
@@ -56,17 +56,17 @@ func NewServer(options Options) *Server {
 	return s
 
 	/*
-	if s.logger == nil {
-		l, err := NewLogger()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create logger")
+		if s.logger == nil {
+			l, err := NewLogger()
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to create logger")
+			}
+			s.logger = l
 		}
-		s.logger = l
-	}
 
-	s.fastcgiClientPool = newFastcgiClientPool(s.fastEndpoint, 4)
+		s.fastcgiClientPool = newFastcgiClientPool(s.fastEndpoint, 4)
 
-	return s, nil
+		return s, nil
 	*/
 }
 

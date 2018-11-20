@@ -38,8 +38,11 @@ func (c *ClientPool) acquireClient() (*clientWrapper, error) {
 		return w, nil
 	}
 
-	w.Client = c.clientFactory()
-
+	cli := c.clientFactory()
+	if err := cli.dialOnce(); err != nil {
+		return nil, err
+	}
+	w.Client = cli
 	return w, nil
 }
 
