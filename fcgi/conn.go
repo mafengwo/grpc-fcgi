@@ -28,17 +28,17 @@ type writeRequestAndError struct {
 // persistConn wraps a connection, usually a persistent one
 // persistConn won't close connection actively
 type persistConn struct {
+	t    *Transport
 	conn net.Conn
 
-	mu                   sync.Mutex
-	numExpectedResponses int
-	reqch                chan requestAndChan
-	writech              chan writeRequestAndError
-	closech              chan struct{}
-	writeErrCh           chan error
-	writeLoopDone        chan struct{}
-	sawEOF               bool
-	closed               bool
+	mu            sync.Mutex
+	reqch         chan requestAndChan
+	writech       chan writeRequestAndError
+	closech       chan struct{}
+	writeErrCh    chan error
+	writeLoopDone chan struct{}
+	sawEOF        bool
+	closed        bool
 
 	nwrite int64 // bytes written
 
@@ -53,11 +53,7 @@ type nothingWrittenError struct {
 
 // only one request on-flight at most.
 func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
-	fmt.Printf("\n\n")
-	// write into write channel to be consumed by writeLoop
-	writeErrCh := make(chan error, 1)
-	pc.writech <- writeRequestAndError{req, writeErrCh}
-
+	fmt.Println("connection round trip")
 	// record request-response
 	resc := make(chan responseAndError)
 	pc.reqch <- requestAndChan{
@@ -66,7 +62,14 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 	}
 
 	startBytesWritten := pc.nwrite
+	// write into write channel to be consumed by writeLoop
+	writeErrCh := make(chan error, 1)
+	pc.writech <- writeRequestAndError{req, writeErrCh}
+
 	wrapError := func(err error) error {
+		if err != nil {
+			fmt.Printf("byte before: %d after: %d err: %v\n", startBytesWritten, pc.nwrite, err)
+		}
 		if startBytesWritten == pc.nwrite && err != nil {
 			err = nothingWrittenError{err}
 		}
@@ -98,13 +101,48 @@ func (pc *persistConn) readLoop() {
 		pc.close()
 	}()
 
-	for !pc.sawEOF && pc.wroteRequest() && !pc.closed {
-		// peek?
-		rc := <-pc.reqch
+	for !pc.sawEOF && !pc.closed {
+		/*
+		unexpectedAnswer := make(chan error)
+		select {
+		case we := <-pc.writeErrCh:
+			if we != nil {
+				return
+			}
+			rc := <-pc.reqch
+			resp, err := readResponse(pc.br)
+			// put connection into freelist
+			pc.t.putIdleConn(pc)
 
+			fmt.Printf("resp: %+v, err: %v\n", resp, err)
+			rc.ch <- responseAndError{res: resp, err: err}
+		case ae := <-unexpectedAnswer:
+			if ae == io.EOF {
+				pc.close()
+				return
+			}
+		}
+		*/
 		resp, err := readResponse(pc.br)
-		fmt.Printf("resp: %+v, err: %v\n", resp, err)
-		rc.ch <- responseAndError{res: resp, err: err}
+		if err != io.EOF {
+			rc := <-pc.reqch
+
+			// put connection into freelist
+			pc.t.putIdleConn(pc)
+
+			fmt.Printf("resp: %+v, err: %v\n", resp != nil, err)
+			rc.ch <- responseAndError{res: resp, err: err}
+		}
+
+		/*
+		_, err := pc.br.Peek(1)
+		if err == io.EOF {
+			pc.close()
+			return
+		}
+		*/
+
+
 	}
 }
 
@@ -117,7 +155,7 @@ func (pc *persistConn) writeLoop() {
 				err = pc.bw.Flush();
 			}
 
-			pc.writeErrCh <- err
+			//pc.writeErrCh <- err
 			wr.ch <- err
 
 			fmt.Printf("write done: %v\n", err)
@@ -140,7 +178,7 @@ func (pc *persistConn) Write(p []byte) (n int, err error) {
 
 func (pc *persistConn) Read(p []byte) (n int, err error) {
 	n, err = pc.conn.Read(p)
-	fmt.Printf("n: %d, err: %v\n", n, err)
+	fmt.Printf("read n: %d, err: %v\n", n, err)
 	if err == io.EOF {
 		pc.sawEOF = true
 	}
@@ -155,7 +193,6 @@ func (pc *persistConn) close() {
 		fmt.Println("close connection")
 		close(pc.closech)
 		pc.conn.Close()
-
 		pc.closed = true
 	}
 }
@@ -164,4 +201,11 @@ func (pc *persistConn) wroteRequest() bool {
 	//TODO timer
 	err := <-pc.writeErrCh
 	return err == nil
+}
+
+func (pc *persistConn) isBroken() bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
+	return pc.closed
 }

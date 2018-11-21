@@ -69,7 +69,6 @@ func newTestConn() (*persistConn, error) {
 
 	conn := &persistConn{
 		conn: netconn,
-		numExpectedResponses: 0,
 		reqch:                make(chan requestAndChan, 1),
 		writech:              make(chan writeRequestAndError, 1),
 		closech:              make(chan struct{}),

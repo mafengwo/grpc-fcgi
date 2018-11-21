@@ -21,7 +21,8 @@ func BenchmarkTransport_RoundTrip(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		resp, err := tran.RoundTrip(newRequest())
 		if err != nil {
-			b.Errorf(err.Error())
+			b.Fatalf(err.Error())
+			b.FailNow()
 		} else {
 			b.Logf("response: %v", resp)
 		}
@@ -81,7 +82,7 @@ func TestTransport_GetConnBlockedAndFree(t *testing.T) {
 
 func newTransport() *Transport {
 	return &Transport{
-		MaxConn: 10,
+		MaxConn: 1,
 		Dial: func(network, addr string) (net.Conn, error) {
 			return net.Dial("tcp", "127.0.0.1:9000")
 		},

@@ -24,6 +24,8 @@ type Transport struct {
 }
 
 func (t *Transport) RoundTrip(req *Request) (*Response, error) {
+	fmt.Printf("\n\n\n")
+	fmt.Println("transport round trip")
 	for {
 		//TODO context.Done()
 		conn, err := t.getConn(nil)
@@ -32,6 +34,7 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		}
 
 		resp, err := conn.roundTrip(req)
+		fmt.Printf("connection round trip return resp: %v, error: %v", resp != nil, err)
 		if err == nil {
 			return resp, err
 		}
@@ -51,6 +54,7 @@ func shouldRetryRequest(req *Request, err error) bool {
 }
 
 func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
+	fmt.Println("try to get idle conn")
 	// get idle connection
 	if pc := t.getIdleConn(); pc != nil {
 		fmt.Println("got idle conn")
@@ -91,7 +95,7 @@ func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
 	select {
 	case ds := <-dialc:
 		fmt.Println("dialed")
-		if ds.err!= nil {
+		if ds.err != nil {
 			// Once dial failed. decrement the connection count
 			t.decConnCount()
 		}
@@ -123,20 +127,30 @@ func (t *Transport) getIdleConn() *persistConn {
 	t.idleMu.Lock()
 	defer t.idleMu.Unlock()
 
-	if t.idleConn == nil || len(t.idleConn) == 0 {
-		return nil
-	}
+	for {
+		if t.idleConn == nil || len(t.idleConn) == 0 {
+			return nil
+		}
 
-	t.idleConn = t.idleConn[:len(t.idleConn)-1]
-	return t.idleConn[len(t.idleConn)-1]
+		pc := t.idleConn[len(t.idleConn)-1]
+		t.idleConn = t.idleConn[:len(t.idleConn)-1]
+		if !pc.isBroken() {
+			return pc
+		}
+	}
 }
 
+// putIdleConn put conn into idleConn OR idleConnCh
 func (t *Transport) putIdleConn(pc *persistConn) {
 	t.idleMu.Lock()
 	defer t.idleMu.Unlock()
 
+	if pc.isBroken() {
+		return
+	}
+
 	select {
-	case t.getIdleConnCh() <- pc:
+	case t.idleConnCh <- pc:
 		// Done here means somebody is currently waiting,
 		// conn cannot put in idleConn in this situation
 		return
@@ -156,13 +170,13 @@ func (t *Transport) dialConn(ctx context.Context) (*persistConn, error) {
 	}
 
 	conn := &persistConn{
-		conn:                 netconn,
-		numExpectedResponses: 0,
-		reqch:                make(chan requestAndChan, 1),
-		writech:              make(chan writeRequestAndError, 1),
-		closech:              make(chan struct{}),
-		writeErrCh:           make(chan error, 1),
-		writeLoopDone:        make(chan struct{}),
+		t:             t,
+		conn:          netconn,
+		reqch:         make(chan requestAndChan, 1),
+		writech:       make(chan writeRequestAndError, 1),
+		closech:       make(chan struct{}),
+		writeErrCh:    make(chan error, 1),
+		writeLoopDone: make(chan struct{}),
 	}
 	conn.br = bufio.NewReader(conn)
 	conn.bw = bufio.NewWriter(conn)
@@ -216,9 +230,15 @@ func (t *Transport) decConnCount() {
 	select {
 	case t.connAvailable <- struct{}{}:
 	default:
+		// close channel before deleting avoids getConn waiting forever in
+		// case getConn has reference to channel but hasn't started waiting.
+		// This could lead to more than MaxConnsPerHost in the unlikely case
+		// that > 1 go routine has fetched the channel but none started waiting.
+		/*
 		if t.connAvailable != nil {
 			close(t.connAvailable)
 		}
+		*/
 	}
 }
 
