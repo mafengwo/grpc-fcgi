@@ -3,7 +3,6 @@ package fcgi
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"net"
 	"sync"
 )
@@ -24,8 +23,8 @@ type Transport struct {
 }
 
 func (t *Transport) RoundTrip(req *Request) (*Response, error) {
-	fmt.Printf("\n\n\n")
-	fmt.Println("transport round trip")
+	// fmt.Printf("\n\n\n")
+	// fmt.Println("transport round trip")
 	for {
 		//TODO context.Done()
 		conn, err := t.getConn(nil)
@@ -34,7 +33,7 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		}
 
 		resp, err := conn.roundTrip(req)
-		fmt.Printf("connection round trip return resp: %v, error: %v", resp != nil, err)
+		// fmt.Printf("connection round trip return resp: %v, error: %v", resp != nil, err)
 		if err == nil {
 			return resp, err
 		}
@@ -54,17 +53,17 @@ func shouldRetryRequest(req *Request, err error) bool {
 }
 
 func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
-	fmt.Println("try to get idle conn")
+	// fmt.Println("try to get idle conn")
 	// get idle connection
 	if pc := t.getIdleConn(); pc != nil {
-		fmt.Println("got idle conn")
+		// fmt.Println("got idle conn")
 		return pc, nil
 	}
 
 	if t.MaxConn > 0 {
 		select {
 		case <-t.incConnCount():
-			fmt.Println("count below limit")
+			// fmt.Println("count below limit")
 			// count below conn limit; proceed
 		case pc := <-t.getIdleConnCh():
 			return pc, nil
@@ -94,7 +93,7 @@ func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
 
 	select {
 	case ds := <-dialc:
-		fmt.Println("dialed")
+		// fmt.Println("dialed")
 		if ds.err != nil {
 			// Once dial failed. decrement the connection count
 			t.decConnCount()
@@ -106,7 +105,7 @@ func (t *Transport) getConn(ctx context.Context) (*persistConn, error) {
 		// else's dial that they didn't use.
 		// But our dial is still going, so give it away
 		// when it finishes:
-		fmt.Println("got idle conn ch")
+		// fmt.Println("got idle conn ch")
 		handlePendingDial()
 		return pc, nil
 	}

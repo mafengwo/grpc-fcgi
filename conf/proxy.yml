@@ -1,0 +1,12 @@
+address: "0.0.0.0:8080"
+timeout: 60
+queue_size: 1000
+reserve_headers:
+  - "Content-Type"
+
+fastcgi:
+  address: "127.0.0.1:9000"
+  connection_limit: 10
+  script_file_name: "/var/html/index.php"
+  document_root: "/var/html"
+

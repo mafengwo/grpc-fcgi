@@ -1,7 +1,7 @@
 package grpc
 
 import (
-	"github.com/bakins/grpc-fastcgi-proxy/fcgiclient"
+	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
 	"github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -9,13 +9,12 @@ import (
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
-
 )
 
 type Proxy struct {
-	opt               *Options
-	fastcgiClientPool *fcgiclient.FastcgiClientPool
-	internalServer    *grpc.Server
+	opt            *Options
+	fcgi           *fcgi.Transport
+	internalServer *grpc.Server
 }
 
 func NewProxy(opt *Options) (*Proxy, error) {
@@ -54,4 +53,3 @@ func (p *Proxy) GracefulStop() error {
 	p.internalServer.GracefulStop()
 	return nil
 }
-

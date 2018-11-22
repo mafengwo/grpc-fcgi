@@ -1,6 +1,7 @@
 package fcgi
 
 import (
+	"bytes"
 	"net"
 	"testing"
 	"time"
@@ -79,7 +80,6 @@ func TestTransport_GetConnBlockedAndFree(t *testing.T) {
 	}
 }
 
-
 func newTransport() *Transport {
 	return &Transport{
 		MaxConn: 1,
@@ -88,3 +88,22 @@ func newTransport() *Transport {
 		},
 	}
 }
+
+func newRequest() *Request {
+	return &Request{
+		Header: map[string][]string{
+			"REQUEST_METHOD":    {"GET"},
+			"SERVER_PROTOCOL":   {"HTTP/2.0"},
+			"HTTP_HOST":         {"localhost"},
+			"CONTENT_TYPE":      {"text/html"},
+			"REQUEST_URI":       {"/p1/p2?a=b"},
+			"SCRIPT_NAME":       {"/p1/p2"},
+			"GATEWAY_INTERFACE": {"CGI/1.1"},
+			"QUERY_STRING":      {"a=b"},
+			"DOCUMENT_ROOT":     {"/Users/jjw/gocode/src/gitlab.mfwdev.com/golibrary/grpc-proxy-test/php/"},
+			"SCRIPT_FILENAME":   {"/Users/jjw/gocode/src/gitlab.mfwdev.com/golibrary/grpc-proxy-test/php/index.php"},
+		},
+		Body: bytes.NewReader([]byte{0x01}),
+	}
+}
+

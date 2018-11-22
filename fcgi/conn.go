@@ -3,7 +3,6 @@ package fcgi
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -53,7 +52,7 @@ type nothingWrittenError struct {
 
 // only one request on-flight at most.
 func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
-	fmt.Println("connection round trip")
+	// fmt.Println("connection round trip")
 	// record request-response
 	resc := make(chan responseAndError)
 	pc.reqch <- requestAndChan{
@@ -68,7 +67,7 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 
 	wrapError := func(err error) error {
 		if err != nil {
-			fmt.Printf("byte before: %d after: %d err: %v\n", startBytesWritten, pc.nwrite, err)
+			// fmt.Printf("byte before: %d after: %d err: %v\n", startBytesWritten, pc.nwrite, err)
 		}
 		if startBytesWritten == pc.nwrite && err != nil {
 			err = nothingWrittenError{err}
@@ -81,15 +80,15 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 		select {
 		case err := <-writeErrCh: // write done
 			if err != nil {
-				fmt.Println("write error")
+				// fmt.Println("write error")
 				return nil, wrapError(err)
 			}
 		case <-pc.closech: // connection closed
-			fmt.Println("connection closed")
+			// fmt.Println("connection closed")
 			err := errors.New("connection closed")
 			return nil, wrapError(err)
 		case re := <-resc: // response received
-			fmt.Println("resp received")
+			// fmt.Println("resp received")
 			res, err := re.res, re.err
 			return res, wrapError(err)
 		}
@@ -102,27 +101,7 @@ func (pc *persistConn) readLoop() {
 	}()
 
 	for !pc.sawEOF && !pc.closed {
-		/*
-		unexpectedAnswer := make(chan error)
-		select {
-		case we := <-pc.writeErrCh:
-			if we != nil {
-				return
-			}
-			rc := <-pc.reqch
-			resp, err := readResponse(pc.br)
-			// put connection into freelist
-			pc.t.putIdleConn(pc)
-
-			fmt.Printf("resp: %+v, err: %v\n", resp, err)
-			rc.ch <- responseAndError{res: resp, err: err}
-		case ae := <-unexpectedAnswer:
-			if ae == io.EOF {
-				pc.close()
-				return
-			}
-		}
-		*/
+		// peak first?
 		resp, err := readResponse(pc.br)
 		if err != io.EOF {
 			rc := <-pc.reqch
@@ -130,19 +109,9 @@ func (pc *persistConn) readLoop() {
 			// put connection into freelist
 			pc.t.putIdleConn(pc)
 
-			fmt.Printf("resp: %+v, err: %v\n", resp != nil, err)
+			// fmt.Printf("resp: %+v, err: %v\n", resp != nil, err)
 			rc.ch <- responseAndError{res: resp, err: err}
 		}
-
-		/*
-		_, err := pc.br.Peek(1)
-		if err == io.EOF {
-			pc.close()
-			return
-		}
-		*/
-
-
 	}
 }
 
@@ -158,13 +127,13 @@ func (pc *persistConn) writeLoop() {
 			//pc.writeErrCh <- err
 			wr.ch <- err
 
-			fmt.Printf("write done: %v\n", err)
+			// fmt.Printf("write done: %v\n", err)
 			if err != nil {
 				pc.close()
 				return
 			}
 		case <-pc.closech: // to avoid goroutine running background on a closed conn
-			fmt.Println("close signal received, stop writing")
+			// fmt.Println("close signal received, stop writing")
 			return
 		}
 	}
@@ -178,7 +147,7 @@ func (pc *persistConn) Write(p []byte) (n int, err error) {
 
 func (pc *persistConn) Read(p []byte) (n int, err error) {
 	n, err = pc.conn.Read(p)
-	fmt.Printf("read n: %d, err: %v\n", n, err)
+	// fmt.Printf("read n: %d, err: %v\n", n, err)
 	if err == io.EOF {
 		pc.sawEOF = true
 	}
@@ -190,7 +159,7 @@ func (pc *persistConn) close() {
 	defer pc.mu.Unlock()
 
 	if !pc.closed {
-		fmt.Println("close connection")
+		// fmt.Println("close connection")
 		close(pc.closech)
 		pc.conn.Close()
 		pc.closed = true

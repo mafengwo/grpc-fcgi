@@ -5,18 +5,23 @@ import (
 	"net"
 )
 
-type Options struct {
-	Address        string `required:"true"`
-	Concurrency    int    `required:"true"`
-	Timeout        int    `required:"true"`
-	HeadersAllowed []string
-
-	FastcgiAddress        string `required:"true"`
-	FastcgiScriptFileName string `required:"true"`
-	FastcgiDocumentRoot   string `required:"true"`
+type FcgiOptions struct {
+	Address         string `required:"true"`
+	ConnectionLimit int    `required:"true"`
+	ScriptFileName  string `required:"true"`
+	DocumentRoot    string `required:"true"`
 }
 
-func (o *Options) Validate() error {
+type Options struct {
+	Address        string `required:"true"`
+	QueueSize      int    `required:"true"`
+	Timeout        int    `required:"true"`
+	ReserveHeaders []string
+
+	Fcgi FcgiOptions
+}
+
+func LoadConfig(file string) (*Options, error) {
 
 }
 

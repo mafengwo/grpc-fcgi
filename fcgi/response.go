@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http/httputil"
 	"net/textproto"
+	"strconv"
 )
 
 type Response struct {
@@ -86,4 +87,13 @@ PARSE:
 		Body:         body,
 		ErrorMessage: errmsg,
 	}, nil
+}
+
+func (r *Response) GetStatusCode() (int, error) {
+	vals, exist := r.Headers["Status"]
+	if !exist || len(vals) == 0 || vals[0] == "" {
+		return 200, nil
+	}
+
+	return strconv.Atoi(vals[0][0:3])
 }

@@ -2,6 +2,7 @@ package fcgi
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"strconv"
 )
@@ -14,6 +15,8 @@ type SizedReader interface {
 type Request struct {
 	Header map[string][]string
 	Body SizedReader
+
+	ctx context.Context
 }
 
 func (r *Request) write(w io.Writer) error {
@@ -34,5 +37,10 @@ func (r *Request) write(w io.Writer) error {
 	var bodyBuf buffer
 	bodyBuf.Reset()
 	return writeStdin(w, &bodyBuf, requestID, bufio.NewReader(r.Body))
+}
+
+func (r *Request) WithContext(ctx context.Context) (*Request) {
+	r.ctx = ctx
+	return r
 }
 
