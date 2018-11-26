@@ -1,84 +1,56 @@
 package grpc
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/transport"
 	"net/http"
 	"strings"
+	"time"
 )
 
-func (p *Proxy) handleStream(srv interface{}, stream grpc.ServerStream) error {
+type streamHandler struct {
+	fcgiOptions *FcgiOptions
+	fcgiClient  *fcgi.Transport
+	errorLogger *zap.Logger
+	logAccess   func(fields ...zap.Field)
+}
+
+func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream) error {
+	req := &request{
+		requestID: uuid.New().String(),
+		requestTime: time.Now(),
+	}
+	defer sh.log(req)
+
+	if err := readRequest(stream, req); err != nil {
+		sh.errorLogger.Error("failed to parse stream to fcgi request:" + err.Error())
+		return status.Errorf(codes.Internal, err.Error())
+	}
+
 	clientCtx, clientCancel := context.WithCancel(stream.Context())
 	defer clientCancel()
 
-	req, err := p.parseStreamToFcgiRequest(stream)
-	if err != nil {
-		return err
-	}
-	req = req.WithContext(clientCtx)
+	fcgiReq := req.toFcgiRequest(sh.fcgiOptions)
+	fcgiReq = fcgiReq.WithContext(clientCtx)
+	sh.errorLogger.Debug(fmt.Sprintf("fastcgi request: %v", fcgiReq.Header))
 
-	resp, err := p.fcgi.RoundTrip(req)
+	resp, err := sh.fcgiClient.RoundTrip(fcgiReq)
+	sh.errorLogger.Debug(fmt.Sprintf("fastcgi response: %v", resp.Headers))
 	if err != nil {
 		return status.Errorf(codes.Internal, "fastcgi request failed: %s", err)
 	}
 
-	return p.sendResponse(stream, resp)
-
+	return sh.sendResponse(stream, resp)
 }
 
-func (p *Proxy) parseStreamToFcgiRequest(stream grpc.ServerStream) (*fcgi.Request, error) {
-	f := &frame{}
-	if err := stream.RecvMsg(f); err != nil {
-		return nil, status.Errorf(codes.Internal, "RecvMsg failed: %s", err)
-	}
-
-	h, err := p.getFcgiHeaders(stream)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "ParseHeaders failed: %s", err)
-	}
-
-	return &fcgi.Request{
-		Header: h,
-		Body:   bytes.NewReader(f.payload),
-	}, nil
-}
-
-func (p *Proxy) getFcgiHeaders(stream grpc.ServerStream) (map[string][]string, error) {
-	lowLevelServerStream, ok := transport.StreamFromContext(stream.Context())
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "lowLevelServerStream does not exist in context")
-	}
-
-	h := map[string][]string{
-		"REQUEST_METHOD":    {"POST"},
-		"SERVER_PROTOCOL":   {"HTTP/2.0"},
-		"HTTP_HOST":         {"localhost"}, // reserve host grpc request
-		"CONTENT_TYPE":      {"text/html"},
-		"REQUEST_URI":       {lowLevelServerStream.Method()},
-		"SCRIPT_NAME":       {lowLevelServerStream.Method()},
-		"GATEWAY_INTERFACE": {"CGI/1.1"},
-		"QUERY_STRING":      {lowLevelServerStream.Method()},
-		"DOCUMENT_ROOT":     {p.opt.Fcgi.DocumentRoot},
-		"SCRIPT_FILENAME":   {p.opt.Fcgi.ScriptFileName},
-	}
-
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "failed to extract metadata")
-	}
-	for k, v := range md {
-		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
-	}
-	return h, nil
-}
-
-func (p *Proxy)sendResponse(stream grpc.ServerStream, resp *fcgi.Response) error {
+func (sh *streamHandler) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) error {
 	// TODO: convert resp code to grpc code
 	statusCode, err := resp.GetStatusCode()
 	if err != nil {
@@ -89,7 +61,7 @@ func (p *Proxy)sendResponse(stream grpc.ServerStream, resp *fcgi.Response) error
 	}
 
 	responseMetadata := metadata.MD{}
-	for k, v := range p.filterToGrpcHeaders(resp.Headers) {
+	for k, v := range sh.filterToGrpcHeaders(resp.Headers) {
 		responseMetadata[strings.ToLower(k)] = v
 	}
 	if err := stream.SendHeader(responseMetadata); err != nil {
@@ -106,7 +78,21 @@ func (p *Proxy)sendResponse(stream grpc.ServerStream, resp *fcgi.Response) error
 	return nil
 }
 
-func (p *Proxy) filterToGrpcHeaders(fcgiHeaders map[string][]string) map[string][]string {
+func (sh *streamHandler) filterToGrpcHeaders(fcgiHeaders map[string][]string) map[string][]string {
 	// this probably need to be munged?
 	return fcgiHeaders
+}
+
+func (sh *streamHandler) log(req *request) {
+	sh.logAccess(zap.String("request_id", req.requestID),
+		zap.Time("time", req.requestTime),
+		zap.String("host", req.host),
+		zap.String("request_uri", req.method),
+		zap.Int("request_length", req.requestLength),
+		zap.Duration("request_time", req.roundTripTime),
+		zap.Duration("upstream_time", req.upstreamTime),
+		zap.Int("status", req.status),
+		zap.Int("upstream_status", req.upstreamStatus),
+		zap.Int("body_bytes_sent", req.bodyBytesSent),
+	)
 }

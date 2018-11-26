@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -20,6 +21,10 @@ fastcgi:
   script_file_name: "/var/html/index.php"
   document_root: "/var/html"
 
+log: 
+  development: true
+  access_log_path: "stdout"
+  error_log_path: "stderr
 `
 )
 
@@ -36,4 +41,7 @@ func Test_LoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write config file failed: %v", err)
 	}
+	jsonopt, _ := json.MarshalIndent(opt, "", "")
+	t.Logf("%s", jsonopt)
 }
+

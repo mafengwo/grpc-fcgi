@@ -1,28 +1,41 @@
 package grpc
 
 import (
+	"github.com/jinzhu/configor"
 	"github.com/pkg/errors"
 	"net"
 )
 
+type LogOptions struct {
+	AccessLogPath string `yaml:"access_log_path"`
+	ErrorLogPath  string `yaml:"error_log_path"`
+	ErrorLogLevel string `yaml:"error_log_level"`
+}
+
 type FcgiOptions struct {
-	Address         string `required:"true"`
-	ConnectionLimit int    `required:"true"`
-	ScriptFileName  string `required:"true"`
-	DocumentRoot    string `required:"true"`
+	Address         string `required:"true" yaml:"address"`
+	ConnectionLimit int    `required:"true" yaml:"connection_limit"`
+	ScriptFileName  string `required:"true" yaml:"script_file_name"`
+	DocumentRoot    string `required:"true" yaml:"document_root"`
 }
 
 type Options struct {
-	Address        string `required:"true"`
-	QueueSize      int    `required:"true"`
-	Timeout        int    `required:"true"`
-	ReserveHeaders []string
+	Address        string   `required:"true" yaml:"address"`
+	QueueSize      int      `required:"true" yaml:"queue_size"`
+	Timeout        int      `required:"true" yaml:"timeout"`
+	ReserveHeaders []string `yaml:"reserve_headers"`
 
-	Fcgi FcgiOptions
+	Fcgi FcgiOptions `required:"true" yaml:"fastcgi"`
+	Log LogOptions `required:"true" yaml:"log"`
 }
 
 func LoadConfig(file string) (*Options, error) {
-
+	opt := &Options{}
+	err := configor.Load(opt, file)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to load configuration")
+	}
+	return opt, nil
 }
 
 func canonicalizateHostPort(addr string) (string, error) {
