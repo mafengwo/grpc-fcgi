@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"github.com/bakins/grpc-fastcgi-proxy/test_client/flight_price"
 	"log"
 	"time"
+
+	"github.com/bakins/grpc-fastcgi-proxy/test_client/flight_price"
+	"google.golang.org/grpc/metadata"
 
 	"google.golang.org/grpc"
 )
@@ -24,7 +25,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
-	fmt.Printf("connected\n")
 	defer conn.Close()
 
 	cc := make(chan int, *concurrency)
@@ -37,15 +37,19 @@ func main() {
 				DepartureCityID: 1,
 				ArriveCityID:    2,
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*12)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
 			defer cancel()
+			header := metadata.New(map[string]string{
+				"client": "go-proxy-test",
+			})
+			ctx = metadata.NewOutgoingContext(ctx, header)
 
-			reply, err := cli.GetCityCheapestPrice(ctx, req)
+			var respHeader, respTrailer metadata.MD
+			reply, err := cli.GetCityCheapestPrice(ctx, req, grpc.Header(&respHeader), grpc.Trailer(&respTrailer))
 			if err != nil {
 				log.Printf("failed: %v", err)
-			} else {
-				log.Printf("reply: %+v", reply)
 			}
+			log.Printf("reply: %+v; header: %+v; trailer: %+v", reply, respHeader, respTrailer)
 
 			<-cc
 		}()

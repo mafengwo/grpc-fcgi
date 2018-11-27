@@ -9,7 +9,7 @@ ob_start();
 require_once dirname(__FILE__).'/vendor/autoload.php';
 
 //throw new \Exception("test");
-$a = $_GET['r']
+//$a = $_GET['r']
 echo print_r($_GET, true);
 // Protobuf-serialized request message body
 $body = file_get_contents("php://input");

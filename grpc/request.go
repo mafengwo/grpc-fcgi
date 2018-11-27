@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"strings"
@@ -19,7 +18,7 @@ type request struct {
 	host          string
 	method        string
 	requestLength int
-	headers       map[string][]string
+	metadata       map[string][]string
 	body          *bytes.Reader
 
 	roundTripTime  time.Duration
@@ -28,7 +27,6 @@ type request struct {
 	upstreamStatus int
 	bodyBytesSent  int
 
-	logger *zap.Logger
 	ctx    context.Context
 }
 
@@ -45,17 +43,18 @@ func readRequest(stream grpc.ServerStream, r *request) error {
 	}
 	r.body = bytes.NewReader(f.payload)
 
-	h := map[string][]string{}
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
 		return errors.New("failed to extract metadata")
 	}
 	for k, v := range md {
-		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
+		if k == ":authority" && len(v) != 0 {
+			r.host = v[0]
+			delete(md, k)
+		}
 	}
-	r.headers = h
+	r.metadata = md
 
-	r.host = "host" //todo
 	r.requestLength = int(r.body.Size())
 	return nil
 }
@@ -64,7 +63,7 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
 		"REQUEST_METHOD":    {"POST"},
 		"SERVER_PROTOCOL":   {"HTTP/2.0"},
-		"HTTP_HOST":         {"localhost"}, // reserve host grpc request
+		"HTTP_HOST":         {r.host}, // reserve host grpc request
 		"CONTENT_TYPE":      {"text/html"},
 		"REQUEST_URI":       {r.method},
 		"SCRIPT_NAME":       {r.method},
@@ -73,9 +72,13 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 		"DOCUMENT_ROOT":     {opts.DocumentRoot},
 		"SCRIPT_FILENAME":   {opts.ScriptFileName},
 	}
+	for k, v := range r.metadata {
+		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
+	}
 
-	return &fcgi.Request{
+	req := &fcgi.Request{
 		Header: h,
 		Body:   r.body,
 	}
+	return req.WithContext(r.ctx)
 }

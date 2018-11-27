@@ -1,7 +1,6 @@
 package grpc
 
 import (
-	"context"
 	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
 	"github.com/bakins/grpc-fastcgi-proxy/log"
 	"github.com/grpc-ecosystem/go-grpc-middleware"
@@ -11,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
+	"time"
 )
 
 type Proxy struct {
@@ -33,7 +33,15 @@ func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
 		logAccess: func(fields ...zap.Field) {
 			logger.AcquireAccessLogger().Info("", fields...)
 		},
+		reservedHeaders: opt.ReserveHeaders,
 	}
+	if opt.QueueSize > 0 {
+		sh.queue = make(chan int, opt.QueueSize)
+	}
+	if opt.Timeout > 0 {
+		sh.timeout = time.Second * time.Duration(opt.Timeout)
+	}
+
 	p := &Proxy{
 		opt:  opt,
 		streamHandler: sh,
@@ -44,7 +52,6 @@ func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
 		grpc.UnknownServiceHandler(sh.handleStream),
 		grpc.StreamInterceptor(
 			grpc_middleware.ChainStreamServer(
-				p.StreamInterceptorContext,
 				grpc_recovery.StreamServerInterceptor(),
 			),
 		),
@@ -73,13 +80,4 @@ func (p *Proxy) GracefulStop() error {
 	//TODO timeout
 	p.internalServer.GracefulStop()
 	return nil
-}
-
-func (p *Proxy)StreamInterceptorContext(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	newCtx := context.WithValue(stream.Context(), "access_logger", p.logger.AcquireErrorLogger())
-	wrapped := grpc_middleware.WrapServerStream(stream)
-	wrapped.WrappedContext = newCtx
-
-	err := handler(srv, wrapped)
-	return err
 }
