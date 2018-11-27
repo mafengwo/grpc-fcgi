@@ -7,9 +7,10 @@ import (
 )
 
 type LogOptions struct {
-	AccessLogPath string `yaml:"access_log_path"`
-	ErrorLogPath  string `yaml:"error_log_path"`
-	ErrorLogLevel string `yaml:"error_log_level"`
+	AccessLogPath string `required:"true" yaml:"access_log_path"`
+	ErrorLogPath  string `required:"true" yaml:"error_log_path"`
+	ErrorLogLevel string `required:"true" yaml:"error_log_level"`
+	ErrorLogTrace bool `yaml:"error_log_trace"`
 }
 
 type FcgiOptions struct {
@@ -44,4 +45,8 @@ func canonicalizateHostPort(addr string) (string, error) {
 		return "", errors.Wrap(err, "SplitHostPort failed")
 	}
 	return net.JoinHostPort(host, port), nil
+}
+
+func (opt *Options)Validate() error {
+	return nil
 }

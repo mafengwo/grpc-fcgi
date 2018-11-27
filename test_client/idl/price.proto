@@ -8,6 +8,8 @@ message CityCheapestPriceRequest {
 }
 
 message CityCheapestPriceReply {
-    float Price = 1;
-    string Concurrency = 2;
+    uint64 DepartureCityID = 1;
+    uint64 ArriveCityID = 2;
+    float Price = 3;
+    string Concurrency = 4;
 }

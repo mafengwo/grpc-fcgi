@@ -1,8 +1,7 @@
 package grpc
 
 import (
-	"fmt"
-	"github.com/bakins/grpc-fastcgi-proxy/log"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -28,23 +27,13 @@ var (
 		AccessLogPath: "stdout",
 		ErrorLogPath:  "stderr",
 		ErrorLogLevel: "warn",
+		ErrorLogTrace: false,
 	}
 )
 
 func TestProxy_Serve(t *testing.T) {
-	logger, err := log.NewLogger(logopt)
-	if err != nil {
-		t.Fatalf("cannot init logger: %v", err)
-	}
-
-	p, err := NewProxy(opt, logger)
-	if err != nil {
-		t.Fatalf("cannot init proxy: %v", err)
-	}
-
-	if err = p.Serve(); err != nil {
-		t.Fatalf("failed to serve: %v", err)
-	}
+	p := NewProxy(opt, prepareLogger())
+	startServe(p)
 }
 
 var (
@@ -54,27 +43,53 @@ time.Sleep(50);
 `
 )
 func TestProxy_Timeout(t *testing.T) {
-	fp := dc + "/test.php";
-	defer os.Remove(fp)
-	if err := ioutil.WriteFile(fp, []byte(costlyPhp), 0777); err != nil {
-		t.Errorf("write file failed: %v", err)
+	release := writeTempPhpFile(costlyPhp, opt)
+	defer release()
+
+	p := NewProxy(opt, prepareLogger())
+	startServe(p)
+}
+
+var (
+	fastAndSlowPhp = `<?php
+
+if ($us = rand(1000, 10000000)) {
+	usleep($us);
+}
+`
+)
+
+func TestProxy_FastAndSlow(t *testing.T) {
+	release := writeTempPhpFile(fastAndSlowPhp, opt)
+	defer release()
+
+	p := NewProxy(opt, prepareLogger())
+	startServe(p)
+}
+
+func writeTempPhpFile(content string, opt *Options) func() {
+	fp := dc + "/test.php"
+	if err := ioutil.WriteFile(fp, []byte(content), 0777); err != nil {
+		panic("write file failed: " + err.Error())
 	}
 	opt.Fcgi.ScriptFileName = fp
-	opt.Timeout = 3
-	filecontent, _ := ioutil.ReadFile(fp)
-	fmt.Printf("%s %s", fp, filecontent)
 
-	logger, err := log.NewLogger(logopt)
-	if err != nil {
-		t.Fatalf("cannot init logger: %v", err)
-	}
-
-	p, err := NewProxy(opt, logger)
-	if err != nil {
-		t.Fatalf("cannot init proxy: %v", err)
-	}
-
-	if err = p.Serve(); err != nil {
-		t.Fatalf("failed to serve: %v", err)
+	return func() {
+		os.Remove(fp)
 	}
 }
+
+func prepareLogger() *log.Logger {
+	logger, err := log.NewLogger(logopt)
+	if err != nil {
+		panic("cannot init logger: " + err.Error())
+	}
+	return logger
+}
+
+func startServe(p *Proxy) {
+	if err := p.Serve(); err != nil {
+		panic("failed to serve: " + err.Error())
+	}
+}
+

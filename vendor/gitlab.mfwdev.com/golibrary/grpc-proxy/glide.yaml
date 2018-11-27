@@ -1,0 +1,23 @@
+package: gitlab.mfwdev.com/golibrary/grpc-proxy
+import:
+- package: github.com/jinzhu/configor
+- package: github.com/kellegous/fcgi
+- package: github.com/pkg/errors
+  version: ~0.8.0
+- package: github.com/sirupsen/logrus
+  version: ~1.2.0
+- package: github.com/soheilhy/cmux
+  version: ~0.1.4
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: golang.org/x/sync
+  subpackages:
+  - errgroup
+- package: google.golang.org/grpc
+  version: ~1.13.0
+  subpackages:
+  - codes
+  - metadata
+  - status
+  - transport

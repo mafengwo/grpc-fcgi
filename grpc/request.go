@@ -5,7 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"strings"
@@ -28,6 +29,9 @@ type request struct {
 	bodyBytesSent  int
 
 	ctx    context.Context
+
+	accessLogger   *zap.Logger
+	errorLogger *zap.Logger
 }
 
 func readRequest(stream grpc.ServerStream, r *request) error {

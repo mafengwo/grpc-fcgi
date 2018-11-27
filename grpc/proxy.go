@@ -1,12 +1,11 @@
 package grpc
 
 import (
-	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
-	"github.com/bakins/grpc-fastcgi-proxy/log"
 	"github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
@@ -20,7 +19,7 @@ type Proxy struct {
 	logger         *log.Logger
 }
 
-func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
+func NewProxy(opt *Options, logger *log.Logger) *Proxy {
 	sh := &streamHandler{
 		fcgiOptions: &opt.Fcgi,
 		fcgiClient: &fcgi.Transport{
@@ -29,11 +28,8 @@ func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
 				return net.Dial("tcp", opt.Fcgi.Address)
 			},
 		},
-		errorLogger: logger.AcquireErrorLogger(),
-		logAccess: func(fields ...zap.Field) {
-			logger.AcquireAccessLogger().Info("", fields...)
-		},
 		reservedHeaders: opt.ReserveHeaders,
+		logger:          logger,
 	}
 	if opt.QueueSize > 0 {
 		sh.queue = make(chan int, opt.QueueSize)
@@ -43,9 +39,9 @@ func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
 	}
 
 	p := &Proxy{
-		opt:  opt,
+		opt:           opt,
 		streamHandler: sh,
-		logger:logger,
+		logger:        logger,
 	}
 	p.internalServer = grpc.NewServer(
 		grpc.CustomCodec(Codec()),
@@ -56,13 +52,10 @@ func NewProxy(opt *Options, logger *log.Logger) (*Proxy, error) {
 			),
 		),
 	)
-	return p, nil
+	return p
 }
 
 func (p *Proxy) Serve() error {
-	// grpc_zap.ReplaceGrpcLogger(s.logger)
-	p.logger.AcquireErrorLogger().Info("starting to serve")
-
 	l, err := net.Listen("tcp", p.opt.Address)
 	if err != nil {
 		return errors.Wrapf(err, "failed to listen on %s", p.opt.Address)

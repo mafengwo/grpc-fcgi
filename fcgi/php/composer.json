@@ -2,5 +2,11 @@
     "name": "grpc-php-server-example",
     "require": {
         "google/protobuf": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Flight\\": "Flight",
+            "GPBMetadata\\": "GPBMetadata"
+        }
     }
 }
