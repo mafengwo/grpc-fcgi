@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/tags"
+	"github.com/grpc-ecosystem/go-grpc-middleware/tags/zap"
 	"github.com/grpc-ecosystem/go-grpc-middleware/testing"
 	pb_testproto "github.com/grpc-ecosystem/go-grpc-middleware/testing/testproto"
 	"go.uber.org/zap"
@@ -25,7 +25,8 @@ type loggingPingService struct {
 
 func (s *loggingPingService) Ping(ctx context.Context, ping *pb_testproto.PingRequest) (*pb_testproto.PingResponse, error) {
 	grpc_ctxtags.Extract(ctx).Set("custom_tags.string", "something").Set("custom_tags.int", 1337)
-	grpc_zap.Extract(ctx).Info("some ping")
+	ctx_zap.AddFields(ctx, zap.String("custom_field", "custom_value"))
+	ctx_zap.Extract(ctx).Info("some ping")
 	return s.TestServiceServer.Ping(ctx, ping)
 }
 
@@ -35,7 +36,7 @@ func (s *loggingPingService) PingError(ctx context.Context, ping *pb_testproto.P
 
 func (s *loggingPingService) PingList(ping *pb_testproto.PingRequest, stream pb_testproto.TestService_PingListServer) error {
 	grpc_ctxtags.Extract(stream.Context()).Set("custom_tags.string", "something").Set("custom_tags.int", 1337)
-	grpc_zap.Extract(stream.Context()).Info("some pinglist")
+	ctx_zap.Extract(stream.Context()).Info("some pinglist")
 	return s.TestServiceServer.PingList(ping, stream)
 }
 
@@ -84,20 +85,22 @@ func (s *zapBaseSuite) SetupTest() {
 	s.mutexBuffer.Unlock()
 }
 
-func (s *zapBaseSuite) getOutputJSONs() []string {
-	ret := []string{}
+func (s *zapBaseSuite) getOutputJSONs() []map[string]interface{} {
+	ret := make([]map[string]interface{}, 0)
 	dec := json.NewDecoder(s.mutexBuffer)
+
 	for {
-		var val map[string]json.RawMessage
+		var val map[string]interface{}
 		err := dec.Decode(&val)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			s.T().Fatalf("failed decoding output from ZAP JSON: %v", err)
+			s.T().Fatalf("failed decoding output from Logrus JSON: %v", err)
 		}
-		out, _ := json.MarshalIndent(val, "", "  ")
-		ret = append(ret, string(out))
+
+		ret = append(ret, val)
 	}
+
 	return ret
 }

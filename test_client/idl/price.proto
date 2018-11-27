@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package flight.price;
+
+message CityCheapestPriceRequest {
+    uint64 DepartureCityID = 1;
+    uint64 ArriveCityID = 2;
+}
+
+message CityCheapestPriceReply {
+    float Price = 1;
+    string Concurrency = 2;
+}

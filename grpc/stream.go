@@ -1,112 +1,159 @@
 package grpc
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/transport"
 	"net/http"
 	"strings"
+	"time"
 )
 
-func (p *Proxy) handleStream(srv interface{}, stream grpc.ServerStream) error {
-	clientCtx, clientCancel := context.WithCancel(stream.Context())
-	defer clientCancel()
+type streamHandler struct {
+	fcgiOptions *FcgiOptions
+	fcgiClient  *fcgi.Transport
+	errorLogger *zap.Logger
+	logAccess   func(fields ...zap.Field)
 
-	req, err := p.parseStreamToFcgiRequest(stream)
-	if err != nil {
+	queue           chan int
+	timeout         time.Duration
+	reservedHeaders []string
+}
+
+func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream) error {
+	req := &request{
+		requestID:   uuid.New().String(),
+		requestTime: time.Now(),
+	}
+	defer sh.log(req)
+
+	var cancelc context.CancelFunc
+	if sh.timeout > 0 {
+		req.ctx, cancelc = context.WithTimeout(stream.Context(), sh.timeout)
+	} else {
+		req.ctx, cancelc = context.WithCancel(stream.Context())
+	}
+	defer cancelc()
+
+	proxyDone := make(chan error)
+	go func() {
+		err := sh.handleRequest(stream, req)
+		proxyDone <- err
+	}()
+
+	select {
+	case <-req.ctx.Done():
+		sh.errorLogger.Warn("request context done")
+		return status.Errorf(codes.DeadlineExceeded, "context deadline exceeded")
+	case err := <-proxyDone:
+		req.status = int(codes.DeadlineExceeded)
+		if err != nil {
+			sh.errorLogger.Error(fmt.Sprintf("execute request failed: %v", err))
+		}
+		sh.errorLogger.Debug("request execute done")
 		return err
 	}
-	req = req.WithContext(clientCtx)
+}
 
-	resp, err := p.fcgi.RoundTrip(req)
+func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) error {
+	if err := readRequest(stream, req); err != nil {
+		sh.errorLogger.Error("failed to read request from request:" + err.Error())
+		return status.Errorf(codes.Internal, "failed to read request from request: %v", err)
+	}
+
+	release := sh.waitingForProxy()
+	defer release()
+
+	dl, dlset := req.ctx.Deadline()
+	if dlset && dl.Before(time.Now()) {
+		return status.Errorf(codes.DeadlineExceeded, "context deadline exceeded after waiting")
+	}
+
+	fcgiReq := req.toFcgiRequest(sh.fcgiOptions)
+	sh.errorLogger.Debug(fmt.Sprintf("fastcgi request: %v", fcgiReq.Header))
+
+	// proxy to fastcgi server
+	resp, err := sh.fcgiClient.RoundTrip(fcgiReq)
+	sh.errorLogger.Debug(fmt.Sprintf("fastcgi response: %v", resp.Headers))
 	if err != nil {
-		return status.Errorf(codes.Internal, "fastcgi request failed: %s", err)
+		return status.Errorf(codes.Internal, "failed to proxy: %v", err)
 	}
 
-	return p.sendResponse(stream, resp)
-
-}
-
-func (p *Proxy) parseStreamToFcgiRequest(stream grpc.ServerStream) (*fcgi.Request, error) {
-	f := &frame{}
-	if err := stream.RecvMsg(f); err != nil {
-		return nil, status.Errorf(codes.Internal, "RecvMsg failed: %s", err)
-	}
-
-	h, err := p.getFcgiHeaders(stream)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "ParseHeaders failed: %s", err)
-	}
-
-	return &fcgi.Request{
-		Header: h,
-		Body:   bytes.NewReader(f.payload),
-	}, nil
-}
-
-func (p *Proxy) getFcgiHeaders(stream grpc.ServerStream) (map[string][]string, error) {
-	lowLevelServerStream, ok := transport.StreamFromContext(stream.Context())
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "lowLevelServerStream does not exist in context")
-	}
-
-	h := map[string][]string{
-		"REQUEST_METHOD":    {"POST"},
-		"SERVER_PROTOCOL":   {"HTTP/2.0"},
-		"HTTP_HOST":         {"localhost"}, // reserve host grpc request
-		"CONTENT_TYPE":      {"text/html"},
-		"REQUEST_URI":       {lowLevelServerStream.Method()},
-		"SCRIPT_NAME":       {lowLevelServerStream.Method()},
-		"GATEWAY_INTERFACE": {"CGI/1.1"},
-		"QUERY_STRING":      {lowLevelServerStream.Method()},
-		"DOCUMENT_ROOT":     {p.opt.Fcgi.DocumentRoot},
-		"SCRIPT_FILENAME":   {p.opt.Fcgi.ScriptFileName},
-	}
-
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "failed to extract metadata")
-	}
-	for k, v := range md {
-		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
-	}
-	return h, nil
-}
-
-func (p *Proxy)sendResponse(stream grpc.ServerStream, resp *fcgi.Response) error {
-	// TODO: convert resp code to grpc code
+	// read information about response
+	req.upstreamTime = time.Now().Sub(req.requestTime)
+	req.bodyBytesSent = len(resp.Body)
 	statusCode, err := resp.GetStatusCode()
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to parse status code of fcgi response: %s", err)
 	}
+	req.upstreamStatus = statusCode
+
+	s := sh.sendResponse(stream, resp)
+	req.roundTripTime = time.Now().Sub(req.requestTime)
+	req.status = int(s.Code())
+	return status.Errorf(s.Code(), s.Message())
+}
+
+func (sh *streamHandler) waitingForProxy() func() {
+	if sh.queue != nil {
+		sh.queue <- 1
+	}
+	return func() {
+		if sh.queue != nil {
+			<-sh.queue
+		}
+	}
+}
+
+func (sh *streamHandler) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) *status.Status {
+	// TODO: convert resp code to grpc code
+	statusCode, err := resp.GetStatusCode()
+	if err != nil {
+		return status.Newf(codes.Internal, "failed to parse status code of fcgi response: %s", err)
+	}
 	if statusCode != http.StatusOK {
-		return status.Errorf(codes.Internal, string(resp.Body))
+		return status.Newf(codes.Internal, "got fastcgi status: %d", statusCode)
 	}
 
 	responseMetadata := metadata.MD{}
-	for k, v := range p.filterToGrpcHeaders(resp.Headers) {
+	for k, v := range sh.filterToGrpcHeaders(resp.Headers) {
 		responseMetadata[strings.ToLower(k)] = v
 	}
 	if err := stream.SendHeader(responseMetadata); err != nil {
-		return status.Errorf(codes.Internal, "failed to send headers: %s", err)
+		return status.Newf(codes.Internal, "failed to send headers: %s", err)
 	}
 
 	responseFrame := frame{
 		payload: resp.Body,
 	}
 	if err := stream.SendMsg(&responseFrame); err != nil {
-		return status.Errorf(codes.Internal, "failed to send message: %s", err)
+		return status.Newf(codes.Internal, "failed to send message: %s", err)
 	}
 
-	return nil
+	return status.Newf(codes.OK, "")
 }
 
-func (p *Proxy) filterToGrpcHeaders(fcgiHeaders map[string][]string) map[string][]string {
+func (sh *streamHandler) filterToGrpcHeaders(fcgiHeaders map[string][]string) map[string][]string {
 	// this probably need to be munged?
 	return fcgiHeaders
+}
+
+func (sh *streamHandler) log(req *request) {
+	sh.logAccess(zap.String("request_id", req.requestID),
+		zap.Time("time", req.requestTime),
+		zap.String("host", req.host),
+		zap.String("request_uri", req.method),
+		zap.Int("request_length", req.requestLength),
+		zap.Duration("request_time", req.roundTripTime),
+		zap.Duration("upstream_time", req.upstreamTime),
+		zap.Int("status", req.status),
+		zap.Int("upstream_status", req.upstreamStatus),
+		zap.Int("body_bytes_sent", req.bodyBytesSent),
+	)
 }
