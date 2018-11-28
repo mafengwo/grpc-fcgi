@@ -4,9 +4,11 @@ import (
 	"context"
 	"flag"
 	"log"
+	"math/rand"
+	"strconv"
 	"time"
 
-	"github.com/bakins/grpc-fastcgi-proxy/test_client/flight_price"
+	"gitlab.mfwdev.com/service/grpc-fcgi/test_client/flight_price"
 	"google.golang.org/grpc/metadata"
 
 	"google.golang.org/grpc"
@@ -27,35 +29,55 @@ func main() {
 	}
 	defer conn.Close()
 
+	start := time.Now()
+
+	goon := true
 	cc := make(chan int, *concurrency)
-	for i := 0; i < *times; i++ {
+	for i := 0; i < *times && goon; i++ {
 		cc <- 1
 
-		go func() {
-			cli := flight_price.NewPriceClient(conn)
+		go func(i int) {
+			arriveId, departureId := rand.Uint64(), rand.Uint64()
 			req := &flight_price.CityCheapestPriceRequest{
-				DepartureCityID: 1,
-				ArriveCityID:    2,
+				DepartureCityID: departureId,
+				ArriveCityID:    arriveId,
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
 			header := metadata.New(map[string]string{
 				"client": "go-proxy-test",
+				"index": strconv.Itoa(i),
 			})
 			ctx = metadata.NewOutgoingContext(ctx, header)
 
 			var respHeader, respTrailer metadata.MD
+			cli := flight_price.NewPriceClient(conn)
 			reply, err := cli.GetCityCheapestPrice(ctx, req, grpc.Header(&respHeader), grpc.Trailer(&respTrailer))
 			if err != nil {
-				log.Printf("failed: %v", err)
+				log.Printf("%d failed: %v", i, err)
+				goon = false
+			} else if reply.GetArriveCityID() != arriveId || reply.DepartureCityID != departureId {
+				log.Printf("%d input: %d %d, output: %d %d reply: %v",
+					i, arriveId, departureId, reply.GetArriveCityID(), reply.GetDepartureCityID(), reply)
+				goon = false
+			} else {
+				/*
+				log.Printf("arrive id: %d\ndeparture id: %d\nprice: %f\nconcurrent:%s\n",
+					reply.GetArriveCityID(),
+					reply.GetDepartureCityID(),
+					reply.GetPrice(),
+					reply.GetConcurrency())
+				log.Printf("header: %v\n trailer:%v", respHeader, respTrailer)
+				*/
 			}
-			log.Printf("reply: %+v; header: %+v; trailer: %+v", reply, respHeader, respTrailer)
 
 			<-cc
-		}()
+		}(i)
 	}
 
 	for j := 0; j < *concurrency; j++ {
 		cc <- 1
 	}
+	cost := time.Now().Sub(start)
+	log.Printf("cost: %s", cost)
 }

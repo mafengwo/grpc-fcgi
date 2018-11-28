@@ -1,12 +1,18 @@
 address: "0.0.0.0:8080"
-timeout: 60
+timeout: 10
 queue_size: 1000
 reserve_headers:
   - "Content-Type"
 
 fastcgi:
   address: "127.0.0.1:9000"
-  connection_limit: 10
-  script_file_name: "/var/html/index.php"
-  document_root: "/var/html"
+  connection_limit: 3
+  connection_max_request: 500
+  script_file_name: "/Users/jjw/gocode/src/gitlab.mfwdev.com/service/grpc-fcgi/fcgi/php/index.php"
+  document_root: "/Users/jjw/gocode/src/gitlab.mfwdev.com/service/grpc-fcgi/fcgi/php/"
 
+log:
+  access_log_path: "stdout"
+  error_log_path: "stderr"
+  error_log_level: "debug"
+  error_log_trace: false

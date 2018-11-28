@@ -3,8 +3,9 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"github.com/bakins/grpc-fastcgi-proxy/fcgi"
 	"github.com/google/uuid"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -18,20 +19,33 @@ import (
 type streamHandler struct {
 	fcgiOptions *FcgiOptions
 	fcgiClient  *fcgi.Transport
-	errorLogger *zap.Logger
-	logAccess   func(fields ...zap.Field)
 
 	queue           chan int
 	timeout         time.Duration
 	reservedHeaders []string
+
+	logger *log.Logger
 }
 
 func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream) error {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		panic("failed to extract metadata")
+	}
+	if id, ok := md["index"]; ok {
+		fmt.Printf("\nclient id : %s\n", id[0])
+	}
+
+	reqid := uuid.New().String()
 	req := &request{
-		requestID:   uuid.New().String(),
-		requestTime: time.Now(),
+		requestID:    reqid,
+		requestTime:  time.Now(),
+		accessLogger: sh.logger.NewAccessLogger(),
+		errorLogger:  sh.logger.NewErrorLogger().With(zap.String("request_id", reqid)),
 	}
 	defer sh.log(req)
+
+	req.errorLogger.Debug("request received")
 
 	var cancelc context.CancelFunc
 	if sh.timeout > 0 {
@@ -41,30 +55,33 @@ func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream)
 	}
 	defer cancelc()
 
-	proxyDone := make(chan error)
+	proxyDone := make(chan *status.Status)
 	go func() {
-		err := sh.handleRequest(stream, req)
-		proxyDone <- err
+		s := sh.handleRequest(stream, req)
+		proxyDone <- s
 	}()
 
+	var result *status.Status
 	select {
 	case <-req.ctx.Done():
-		sh.errorLogger.Warn("request context done")
-		return status.Errorf(codes.DeadlineExceeded, "context deadline exceeded")
-	case err := <-proxyDone:
-		req.status = int(codes.DeadlineExceeded)
-		if err != nil {
-			sh.errorLogger.Error(fmt.Sprintf("execute request failed: %v", err))
+		req.errorLogger.Debug("request context deadline exceeded")
+		result = status.Newf(codes.DeadlineExceeded, "context deadline exceeded")
+	case result = <-proxyDone:
+		if result.Code() != codes.OK {
+			req.errorLogger.Error(fmt.Sprintf("execute request failed: %v", result.Message()))
 		}
-		sh.errorLogger.Debug("request execute done")
-		return err
 	}
+
+	req.status = int(result.Code())
+	req.roundTripTime = time.Now().Sub(req.requestTime)
+
+	return status.Error(result.Code(), result.Message())
 }
 
-func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) error {
+func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) *status.Status {
 	if err := readRequest(stream, req); err != nil {
-		sh.errorLogger.Error("failed to read request from request:" + err.Error())
-		return status.Errorf(codes.Internal, "failed to read request from request: %v", err)
+		req.errorLogger.Error("failed to read request from request:" + err.Error())
+		return status.Newf(codes.Internal, "failed to read request from request: %v", err)
 	}
 
 	release := sh.waitingForProxy()
@@ -72,32 +89,29 @@ func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) e
 
 	dl, dlset := req.ctx.Deadline()
 	if dlset && dl.Before(time.Now()) {
-		return status.Errorf(codes.DeadlineExceeded, "context deadline exceeded after waiting")
+		return status.Newf(codes.DeadlineExceeded, "context deadline exceeded after waiting")
 	}
 
 	fcgiReq := req.toFcgiRequest(sh.fcgiOptions)
-	sh.errorLogger.Debug(fmt.Sprintf("fastcgi request: %v", fcgiReq.Header))
+	req.errorLogger.Debug(fmt.Sprintf("fastcgi request: %v", fcgiReq.Header))
 
 	// proxy to fastcgi server
 	resp, err := sh.fcgiClient.RoundTrip(fcgiReq)
-	sh.errorLogger.Debug(fmt.Sprintf("fastcgi response: %v", resp.Headers))
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to proxy: %v", err)
+		return status.Newf(codes.Internal, "failed to proxy: %v", err)
 	}
+	req.errorLogger.Debug(fmt.Sprintf("fastcgi response: %v body: %s", resp.Headers, resp.Body))
 
 	// read information about response
 	req.upstreamTime = time.Now().Sub(req.requestTime)
 	req.bodyBytesSent = len(resp.Body)
 	statusCode, err := resp.GetStatusCode()
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to parse status code of fcgi response: %s", err)
+		return status.Newf(codes.Internal, "failed to parse status code of fcgi response: %s", err)
 	}
 	req.upstreamStatus = statusCode
 
-	s := sh.sendResponse(stream, resp)
-	req.roundTripTime = time.Now().Sub(req.requestTime)
-	req.status = int(s.Code())
-	return status.Errorf(s.Code(), s.Message())
+	return sh.sendResponse(stream, resp)
 }
 
 func (sh *streamHandler) waitingForProxy() func() {
@@ -145,7 +159,8 @@ func (sh *streamHandler) filterToGrpcHeaders(fcgiHeaders map[string][]string) ma
 }
 
 func (sh *streamHandler) log(req *request) {
-	sh.logAccess(zap.String("request_id", req.requestID),
+	req.accessLogger.Info("",
+		zap.String("request_id", req.requestID),
 		zap.Time("time", req.requestTime),
 		zap.String("host", req.host),
 		zap.String("request_uri", req.method),

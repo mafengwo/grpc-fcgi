@@ -1,55 +1,54 @@
-package proxy
+package main
 
 import (
 	"flag"
-	"fmt"
-	"github.com/bakins/grpc-fastcgi-proxy/grpc"
-	"gitlab.mfwdev.com/golibrary/grpc-proxy/proxy"
+	"gitlab.mfwdev.com/service/grpc-fcgi/grpc"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
 var (
-	configFile string
+	configFile = flag.String( "f", "", "config file path")
 )
 
-type options struct {
-	grpcOpt *grpc.Options
-}
-
 func main() {
-	flag.StringVar(&configFile, "f", "", "config file path")
 	flag.Parse()
 
-	options, loadErr := loadConfig(configFile)
+	options, loadErr := grpc.LoadConfig(*configFile)
 	if loadErr != nil {
-		//TODO panic
+		panic("cannot load config file: " + loadErr.Error())
 	}
 
 	if err := options.Validate(); err != nil {
-		//TODO panic
+		panic("config item is illegal: " + err.Error())
 	}
 
-	s, err := proxy.NewServer(options)
+	logger, err := log.NewLogger(&log.Options{
+		AccessLogPath: options.Log.AccessLogPath,
+		ErrorLogPath: options.Log.ErrorLogPath,
+		ErrorLogLevel: options.Log.ErrorLogLevel,
+		ErrorLogTrace: options.Log.ErrorLogTrace,
+	})
 	if err != nil {
-		//TODO panic
+		panic("cannot build logger: " + err.Error())
 	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+	s := grpc.NewProxy(options, logger)
 	go func() {
 		<-sigs
-		s.Stop()
+		logger.ErrorLogger().Info("signal received, prepare to shutdown...")
+		s.GracefulStop()
+		logger.ErrorLogger().Info("server has been shutdown")
 	}()
 
-	if err := s.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	logger.ErrorLogger().Info("starting to serve")
+	if err := s.Serve(); err != nil {
+		logger.ErrorLogger().Error("serve failed: " + err.Error())
 		os.Exit(3)
 	}
-}
-
-func loadConfig(path string) (*options, error) {
-
 }
