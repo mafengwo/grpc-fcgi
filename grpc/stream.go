@@ -28,6 +28,14 @@ type streamHandler struct {
 }
 
 func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream) error {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if !ok {
+		panic("failed to extract metadata")
+	}
+	if id, ok := md["index"]; ok {
+		fmt.Printf("\nclient id : %s\n", id[0])
+	}
+
 	reqid := uuid.New().String()
 	req := &request{
 		requestID:    reqid,
@@ -36,6 +44,8 @@ func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream)
 		errorLogger:  sh.logger.NewErrorLogger().With(zap.String("request_id", reqid)),
 	}
 	defer sh.log(req)
+
+	req.errorLogger.Debug("request received")
 
 	var cancelc context.CancelFunc
 	if sh.timeout > 0 {
@@ -54,6 +64,7 @@ func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream)
 	var result *status.Status
 	select {
 	case <-req.ctx.Done():
+		req.errorLogger.Debug("request context deadline exceeded")
 		result = status.Newf(codes.DeadlineExceeded, "context deadline exceeded")
 	case result = <-proxyDone:
 		if result.Code() != codes.OK {

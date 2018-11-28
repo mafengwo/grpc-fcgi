@@ -3,6 +3,9 @@ package fcgi
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"io"
 	"net"
 	"sync"
@@ -27,32 +30,34 @@ type writeRequestAndError struct {
 // persistConn wraps a connection, usually a persistent one
 // persistConn won't close connection actively
 type persistConn struct {
+	id   int
 	t    *Transport
 	conn net.Conn
 
-	mu            sync.Mutex
+	requestNumMu sync.Mutex // guard request num atomic
+	requestNum   int
+
+	mu            sync.Mutex // guard connection status
 	reqch         chan requestAndChan
 	writech       chan writeRequestAndError
 	closech       chan struct{}
 	writeErrCh    chan error
 	writeLoopDone chan struct{}
-	sawEOF        bool
 	closed        bool
 
 	nwrite int64 // bytes written
 
 	br *bufio.Reader // from conn
 	bw *bufio.Writer // to conn
-}
 
-// nothingWrittenError wraps a write errors which ended up writing zero bytes.
-type nothingWrittenError struct {
-	error
+	logger *zap.Logger
 }
 
 // only one request on-flight at most.
 func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
-	// fmt.Println("connection round trip")
+	pc.incRequestNum()
+
+	pc.logDebug(zap.DebugLevel,"connection start to round trip")
 	// record request-response
 	resc := make(chan responseAndError)
 	pc.reqch <- requestAndChan{
@@ -60,57 +65,50 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 		ch:  resc,
 	}
 
-	startBytesWritten := pc.nwrite
 	// write into write channel to be consumed by writeLoop
 	writeErrCh := make(chan error, 1)
 	pc.writech <- writeRequestAndError{req, writeErrCh}
 
-	wrapError := func(err error) error {
-		if err != nil {
-			// fmt.Printf("byte before: %d after: %d err: %v\n", startBytesWritten, pc.nwrite, err)
-		}
-		if startBytesWritten == pc.nwrite && err != nil {
-			err = nothingWrittenError{err}
-		}
-		return err
-	}
-
-	//TODO timer
 	for {
 		select {
 		case err := <-writeErrCh: // write done
 			if err != nil {
-				// fmt.Println("write error")
-				return nil, wrapError(err)
+				return nil, err
 			}
 		case <-pc.closech: // connection closed
-			// fmt.Println("connection closed")
-			err := errors.New("connection closed")
-			return nil, wrapError(err)
+			return nil, errors.New("connection closed")
+		case <-req.ctx.Done():
+			pc.t.putIdleConn(pc)
+			return nil, errors.New("timeout")
 		case re := <-resc: // response received
-			// fmt.Println("resp received")
-			res, err := re.res, re.err
-			return res, wrapError(err)
+			if re.err == nil {
+				pc.t.putIdleConn(pc)
+			}
+			return re.res, re.err
 		}
 	}
 }
 
 func (pc *persistConn) readLoop() {
 	defer func() {
+		pc.logDebug(zap.InfoLevel, "stop reading and start to close connection")
 		pc.close()
 	}()
 
-	for !pc.sawEOF && !pc.closed {
-		// peak first?
+	for !pc.closed {
+		// peak first to enhance performance
+		if _, err := pc.br.Peek(1); err == io.EOF {
+			return
+		}
+
+		pc.logDebug(zap.DebugLevel, "waiting for response")
 		resp, err := readResponse(pc.br)
+		pc.logDebug(zap.DebugLevel, "read response result: %v", err)
 		if err != io.EOF {
 			rc := <-pc.reqch
-
-			// put connection into freelist
-			pc.t.putIdleConn(pc)
-
-			// fmt.Printf("resp: %+v, err: %v\n", resp != nil, err)
-			rc.ch <- responseAndError{res: resp, err: err}
+			rc.ch <- responseAndError{res: resp, err: err} // todo in case nobody waiting
+		} else if err != nil {
+			return
 		}
 	}
 }
@@ -118,6 +116,9 @@ func (pc *persistConn) readLoop() {
 func (pc *persistConn) writeLoop() {
 	for {
 		select {
+		case <-pc.closech: // to avoid goroutine running background on a closed conn
+			pc.logDebug(zap.InfoLevel, "close signal received, stop writing")
+			return
 		case wr := <-pc.writech:
 			err := wr.req.write(pc.bw)
 			if err == nil {
@@ -127,14 +128,11 @@ func (pc *persistConn) writeLoop() {
 			//pc.writeErrCh <- err
 			wr.ch <- err
 
-			// fmt.Printf("write done: %v\n", err)
+			pc.logDebug(zap.DebugLevel, "write result: %v", err)
 			if err != nil {
 				pc.close()
 				return
 			}
-		case <-pc.closech: // to avoid goroutine running background on a closed conn
-			// fmt.Println("close signal received, stop writing")
-			return
 		}
 	}
 }
@@ -147,9 +145,8 @@ func (pc *persistConn) Write(p []byte) (n int, err error) {
 
 func (pc *persistConn) Read(p []byte) (n int, err error) {
 	n, err = pc.conn.Read(p)
-	// fmt.Printf("read n: %d, err: %v\n", n, err)
 	if err == io.EOF {
-		pc.sawEOF = true
+		pc.close()
 	}
 	return
 }
@@ -177,4 +174,39 @@ func (pc *persistConn) isBroken() bool {
 	defer pc.mu.Unlock()
 
 	return pc.closed
+}
+
+func (pc *persistConn) incRequestNum() {
+	pc.requestNumMu.Lock()
+	defer pc.requestNumMu.Unlock()
+
+	pc.requestNum++
+}
+
+func (pc *persistConn) getRequestNum() int {
+	pc.requestNumMu.Lock()
+	defer pc.requestNumMu.Unlock()
+
+	return pc.requestNum
+}
+
+func (pc *persistConn) logDebug(level zapcore.Level, format string, args ...interface{}) {
+	if pc.logger != nil {
+		pc.logger.Check(level, fmt.Sprintf(format, args...)).Write(
+			zap.Int("conn_id", pc.id),
+			zap.Int("request_num", pc.requestNum))
+	}
+}
+
+var (
+	connId      = 0
+	connIdGenMu = sync.Mutex{}
+)
+
+func newConnId() int {
+	connIdGenMu.Lock()
+	defer connIdGenMu.Unlock()
+
+	connId++
+	return connId
 }

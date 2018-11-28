@@ -2,7 +2,12 @@ package fcgi
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -17,15 +22,19 @@ func TestTransport_RoundTrip(t *testing.T) {
 	}
 }
 
+var (
+	tran = newTransport()
+)
+
 func BenchmarkTransport_RoundTrip(b *testing.B) {
-	tran := newTransport()
+	fmt.Println("start roundtrip")
 	for i := 0; i < b.N; i++ {
-		resp, err := tran.RoundTrip(newRequest())
+		_, err := tran.RoundTrip(newRequest())
 		if err != nil {
 			b.Fatalf(err.Error())
 			b.FailNow()
 		} else {
-			b.Logf("response: %v", resp)
+			//b.Logf("response: %v", resp)
 		}
 	}
 }
@@ -81,16 +90,43 @@ func TestTransport_GetConnBlockedAndFree(t *testing.T) {
 }
 
 func newTransport() *Transport {
+	ec := zap.NewProductionEncoderConfig()
+	al, err := zap.Config{
+		Development:       false,
+		DisableCaller:     true,
+		DisableStacktrace: true,
+		EncoderConfig:     ec,
+		Encoding:          "json",
+		ErrorOutputPaths:  []string{"stderr"},
+		Level:             zap.NewAtomicLevelAt(zapcore.InfoLevel),
+		OutputPaths:       []string{"stdout"},
+	}.Build()
+	if err != nil {
+		panic(err.Error())
+	}
+
 	return &Transport{
 		MaxConn: 1,
 		Dial: func(network, addr string) (net.Conn, error) {
 			return net.Dial("tcp", "127.0.0.1:9000")
 		},
+		LogFunc: func(fields map[string]string) {
+			var args []zap.Field
+			for k, v := range fields {
+				args = append(args, zap.String(k, v))
+			}
+			al.Info("", args...)
+		},
 	}
 }
 
 func newRequest() *Request {
-	return &Request{
+	dc, err := filepath.Abs("./php")
+	if err != nil {
+		panic("cannot get php path")
+	}
+	script := dc + "/lite.php"
+	r := &Request{
 		Header: map[string][]string{
 			"REQUEST_METHOD":    {"GET"},
 			"SERVER_PROTOCOL":   {"HTTP/2.0"},
@@ -100,10 +136,12 @@ func newRequest() *Request {
 			"SCRIPT_NAME":       {"/p1/p2"},
 			"GATEWAY_INTERFACE": {"CGI/1.1"},
 			"QUERY_STRING":      {"a=b"},
-			"DOCUMENT_ROOT":     {"/Users/jjw/gocode/src/gitlab.mfwdev.com/golibrary/grpc-proxy-test/php/"},
-			"SCRIPT_FILENAME":   {"/Users/jjw/gocode/src/gitlab.mfwdev.com/golibrary/grpc-proxy-test/php/index.php"},
+			"DOCUMENT_ROOT":     {dc},
+			"SCRIPT_FILENAME":   {script},
 		},
 		Body: bytes.NewReader([]byte{0x01}),
 	}
+	ctx, _ := context.WithTimeout(context.Background(), time.Second * 3)
+	return r.WithContext(ctx)
 }
 

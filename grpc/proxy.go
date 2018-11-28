@@ -27,6 +27,8 @@ func NewProxy(opt *Options, logger *log.Logger) *Proxy {
 			Dial: func(network, addr string) (net.Conn, error) {
 				return net.Dial("tcp", opt.Fcgi.Address)
 			},
+			ConnectionMaxRequest: opt.Fcgi.ConnectionMaxRequest,
+			Logger: logger.NewErrorLogger(),
 		},
 		reservedHeaders: opt.ReserveHeaders,
 		logger:          logger,
