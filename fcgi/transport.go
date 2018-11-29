@@ -61,7 +61,7 @@ func (t *Transport) getConn(req *Request, ctx context.Context) (*persistConn, er
 	if t.MaxConn > 0 {
 		select {
 		case <-t.incConnCount(): // count below conn limit; proceed
-			t.logRequest(req, zap.DebugLevel, "current connection still under MaxConn limit")
+			t.logRequest(req, zap.DebugLevel, "connection num still under MaxConn limit")
 		case pc := <-t.getIdleConnCh():
 			t.logRequest(req, zap.DebugLevel, "over MaxConn limit, but someone released %d", pc.id)
 			return pc, nil
@@ -84,6 +84,7 @@ func (t *Transport) getConn(req *Request, ctx context.Context) (*persistConn, er
 			if v := <-dialc; v.err == nil {
 				t.putIdleConn(v.pc)
 			} else {
+				t.logRequest(req, zap.DebugLevel, "release connection in pending")
 				t.decConnCount()
 			}
 		}()
@@ -206,6 +207,7 @@ func (t *Transport) dialConn(ctx context.Context) (*persistConn, error) {
 	go conn.writeLoop()
 	go func() {
 		<-conn.closech
+		t.logRequest(nil, zap.DebugLevel, "release connection closed")
 		t.decConnCount()
 	}()
 
@@ -246,11 +248,11 @@ func (t *Transport) decConnCount() {
 	t.connCountMu.Lock()
 	defer t.connCountMu.Unlock()
 
-	t.connCount--
 
 	select {
 	case t.connAvailable <- struct{}{}:
 	default:
+		t.connCount--
 		// close channel before deleting avoids getConn waiting forever in
 		// case getConn has reference to channel but hasn't started waiting.
 		// This could lead to more than MaxConnsPerHost in the unlikely case
@@ -270,8 +272,10 @@ func (t *Transport) logRequest(req *Request, level zapcore.Level, format string,
 		fields := []zap.Field{
 			zap.String("layer", "transport"),
 		}
-		if requestId, yes := req.ctx.Value("id").(string); yes {
-			fields = append(fields, zap.String("request_id", requestId))
+		if req != nil {
+			if requestId, yes := req.GetRequestId(); yes {
+				fields = append(fields, zap.String("request_id", requestId))
+			}
 		}
 		t.Logger.Check(level, msg).Write(fields...)
 	}

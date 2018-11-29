@@ -46,7 +46,7 @@ func main() {
 			defer cancel()
 			header := metadata.New(map[string]string{
 				"client": "go-proxy-test",
-				"index": strconv.Itoa(i),
+				"request_id": strconv.Itoa(i),
 			})
 			ctx = metadata.NewOutgoingContext(ctx, header)
 

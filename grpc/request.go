@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -63,6 +64,17 @@ func readRequest(stream grpc.ServerStream, r *request) error {
 	return nil
 }
 
+func getRequestId(stream grpc.ServerStream) string {
+	md, ok := metadata.FromIncomingContext(stream.Context())
+	if ok {
+		if id, exist := md["request_id"]; exist && len(id) > 0 {
+			return id[0]
+		}
+	}
+
+	return uuid.New().String()
+}
+
 func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
 		"REQUEST_METHOD":    {"POST"},
@@ -84,5 +96,5 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 		Header: h,
 		Body:   r.body,
 	}
-	return req.WithContext(r.ctx)
+	return req.WithContext(r.ctx).WithRequestId(r.requestID)
 }

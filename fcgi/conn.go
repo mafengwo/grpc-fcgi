@@ -69,6 +69,7 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 	writeErrCh := make(chan error, 1)
 	pc.writech <- writeRequestAndError{req, writeErrCh}
 
+	pc.logDebug(zap.DebugLevel,"task has been dispatched, waiting for next step")
 	for {
 		select {
 		case err := <-writeErrCh: // write done

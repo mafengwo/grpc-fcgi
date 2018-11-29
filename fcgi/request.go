@@ -44,3 +44,20 @@ func (r *Request) WithContext(ctx context.Context) (*Request) {
 	return r
 }
 
+type requestIdKey struct{}
+
+func (r *Request) WithRequestId(id string) *Request {
+	if r.ctx != nil {
+		r.ctx = context.WithValue(r.ctx, requestIdKey{}, id)
+	}
+	return r
+}
+
+func (r *Request) GetRequestId() (string, bool) {
+	if r.ctx != nil {
+		v, ok := r.ctx.Value(requestIdKey{}).(string)
+		return v, ok
+	}
+	return "", false
+}
+

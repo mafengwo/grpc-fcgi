@@ -6,7 +6,7 @@ reserve_headers:
 
 fastcgi:
   address: "127.0.0.1:9000"
-  connection_limit: 3
+  connection_limit: 1
   connection_max_request: 500
   script_file_name: "/Users/jjw/gocode/src/gitlab.mfwdev.com/service/grpc-fcgi/fcgi/php/index.php"
   document_root: "/Users/jjw/gocode/src/gitlab.mfwdev.com/service/grpc-fcgi/fcgi/php/"
