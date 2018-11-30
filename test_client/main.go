@@ -37,6 +37,7 @@ func main() {
 		cc <- 1
 
 		go func(i int) {
+
 			arriveId, departureId := rand.Uint64(), rand.Uint64()
 			req := &flight_price.CityCheapestPriceRequest{
 				DepartureCityID: departureId,
@@ -44,9 +45,11 @@ func main() {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
+
+			rid := strconv.Itoa(i) + "#" + strconv.Itoa(time.Now().Nanosecond()) + strconv.Itoa(rand.Int())
 			header := metadata.New(map[string]string{
 				"client": "go-proxy-test",
-				"request_id": strconv.Itoa(i),
+				"request_id": rid,
 			})
 			ctx = metadata.NewOutgoingContext(ctx, header)
 
@@ -54,11 +57,13 @@ func main() {
 			cli := flight_price.NewPriceClient(conn)
 			reply, err := cli.GetCityCheapestPrice(ctx, req, grpc.Header(&respHeader), grpc.Trailer(&respTrailer))
 			if err != nil {
-				log.Printf("%d failed: %v", i, err)
+				log.Printf("%s failed: %v", rid, err)
+				log.Printf("header: %v\n trailer:%v", respHeader, respTrailer)
 				goon = false
 			} else if reply.GetArriveCityID() != arriveId || reply.DepartureCityID != departureId {
-				log.Printf("%d input: %d %d, output: %d %d reply: %v",
-					i, arriveId, departureId, reply.GetArriveCityID(), reply.GetDepartureCityID(), reply)
+				log.Printf("%s input: %d %d, output: %d %d reply: %v",
+					rid, arriveId, departureId, reply.GetArriveCityID(), reply.GetDepartureCityID(), reply)
+				log.Printf("header: %v\n trailer:%v", respHeader, respTrailer)
 				goon = false
 			} else {
 				/*

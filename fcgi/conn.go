@@ -79,12 +79,8 @@ func (pc *persistConn) roundTrip(req *Request) (*Response, error) {
 		case <-pc.closech: // connection closed
 			return nil, errors.New("connection closed")
 		case <-req.ctx.Done():
-			pc.t.putIdleConn(pc)
 			return nil, errors.New("timeout")
 		case re := <-resc: // response received
-			if re.err == nil {
-				pc.t.putIdleConn(pc)
-			}
 			return re.res, re.err
 		}
 	}
@@ -106,6 +102,11 @@ func (pc *persistConn) readLoop() {
 		resp, err := readResponse(pc.br)
 		pc.logDebug(zap.DebugLevel, "read response result: %v", err)
 		if err != io.EOF {
+			if err == nil { // which means all responses returned, connection drained
+				pc.logDebug(zap.DebugLevel, "put into idle list")
+				pc.t.putIdleConn(pc)
+			}
+
 			rc := <-pc.reqch
 			rc.ch <- responseAndError{res: resp, err: err} // todo in case nobody waiting
 		} else if err != nil {
@@ -147,6 +148,7 @@ func (pc *persistConn) Write(p []byte) (n int, err error) {
 func (pc *persistConn) Read(p []byte) (n int, err error) {
 	n, err = pc.conn.Read(p)
 	if err == io.EOF {
+		pc.logDebug(zap.InfoLevel, "saw EOF")
 		pc.close()
 	}
 	return

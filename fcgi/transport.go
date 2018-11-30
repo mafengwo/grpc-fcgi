@@ -34,25 +34,28 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		if err != nil {
 			return nil, err
 		}
+		t.logRequest(req, zap.DebugLevel, "get connection %d", conn.id)
 
 		startBytesWritten := conn.nwrite
 
 		resp, err := conn.roundTrip(req)
 		if err == nil {
+			t.logRequest(req, zap.DebugLevel, "connection %d finished request well", conn.id)
 			return resp, err
 		}
 
 		if conn.nwrite != startBytesWritten {
+			t.logRequest(req, zap.DebugLevel, "connection %d execute request error: %v", conn.id, err)
 			return nil, err
 		}
 
-		t.logRequest(req, zap.InfoLevel, "retrying...")
+		t.logRequest(req, zap.InfoLevel, "connection %d done nothing, retrying...", conn.id)
 	}
 }
 
 func (t *Transport) getConn(req *Request, ctx context.Context) (*persistConn, error) {
 	// get idle connection
-	if pc := t.getIdleConn(); pc != nil {
+	if pc := t.getIdleConn(req); pc != nil {
 		t.logRequest(req, zap.DebugLevel, "got idle conn: %d", pc.id)
 		return pc, nil
 	}
@@ -63,7 +66,7 @@ func (t *Transport) getConn(req *Request, ctx context.Context) (*persistConn, er
 		case <-t.incConnCount(): // count below conn limit; proceed
 			t.logRequest(req, zap.DebugLevel, "connection num still under MaxConn limit")
 		case pc := <-t.getIdleConnCh():
-			t.logRequest(req, zap.DebugLevel, "over MaxConn limit, but someone released %d", pc.id)
+			t.logRequest(req, zap.DebugLevel, "get connection %d released", pc.id)
 			return pc, nil
 		}
 	}
@@ -123,7 +126,7 @@ func (t *Transport) getIdleConnCh() chan *persistConn {
 	return t.idleConnCh
 }
 
-func (t *Transport) getIdleConn() *persistConn {
+func (t *Transport) getIdleConn(req *Request) *persistConn {
 	t.idleMu.Lock()
 	defer t.idleMu.Unlock()
 
@@ -131,6 +134,12 @@ func (t *Transport) getIdleConn() *persistConn {
 		if t.idleConn == nil || len(t.idleConn) == 0 {
 			return nil
 		}
+
+		idleids := []int{}
+		for _, c := range t.idleConn {
+			idleids = append(idleids, c.id)
+		}
+		t.logRequest(req, zap.DebugLevel, "connection idle list: %v", idleids)
 
 		pc := t.idleConn[0] // get the LRU connection
 		t.idleConn = t.idleConn[1:]
@@ -150,18 +159,8 @@ func (t *Transport) putIdleConn(pc *persistConn) {
 		return
 	}
 
-	// replace the staled connection with a new one
-	// and then put into idle list
+	// abort dying connection
 	if t.ConnectionMaxRequest > 0 && pc.getRequestNum() >= t.ConnectionMaxRequest {
-		go func() {
-			pc.close() // avoid goroutine leaks
-
-			conn, err := t.dialConn(nil)
-			if err != nil {
-				return
-			}
-			t.putIdleConn(conn)
-		}()
 		return
 	}
 
@@ -228,7 +227,7 @@ func (t *Transport) incConnCount() <-chan struct{} {
 	t.connCountMu.Lock()
 	defer t.connCountMu.Unlock()
 
-	if t.connCount == t.MaxConn {
+	if t.connCount >= t.MaxConn {
 		if t.connAvailable == nil {
 			t.connAvailable = make(chan struct{})
 		}
