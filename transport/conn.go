@@ -2,58 +2,31 @@ package transport
 
 import (
 	"bufio"
-	"compress/gzip"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http/httptrace"
-	"net/textproto"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
 
-
-// connectMethodKey is the map key version of connectMethod, with a
-// stringified proxy URL (or the empty string) instead of a pointer to
-// a URL.
-type connectMethodKey struct {
-	proxy, scheme, addr string
-}
-
-func (k connectMethodKey) String() string {
-	// Only used by tests.
-	return fmt.Sprintf("%s|%s|%s", k.proxy, k.scheme, k.addr)
-}
+const maxInt64 = 1<<63 - 1
 
 // persistConn wraps a connection, usually a persistent one
 // (but may be used for non-keep-alive requests as well)
 type persistConn struct {
-	// alt optionally specifies the TLS NextProto RoundTripper.
-	// This is used for HTTP/2 today and future protocols later.
-	// If it's non-nil, the rest of the fields are unused.
-	alt RoundTripper
-
-	t         *Transport
-	cacheKey  connectMethodKey
-	conn      net.Conn
-	tlsState  *tls.ConnectionState
-	br        *bufio.Reader       // from conn
-	bw        *bufio.Writer       // to conn
-	nwrite    int64               // bytes written
-	reqch     chan requestAndChan // written by roundTrip; read by readLoop
-	writech   chan writeRequest   // written by roundTrip; read by writeLoop
-	closech   chan struct{}       // closed when conn closed
-	isProxy   bool
-	sawEOF    bool  // whether we've seen EOF from conn; owned by readLoop
-	readLimit int64 // bytes allowed to be read; owned by readLoop
-	// writeErrCh passes the request write error (usually nil)
-	// from the writeLoop goroutine to the readLoop which passes
-	// it off to the res.Body reader, which then uses it to decide
-	// whether or not a connection can be reused. Issue 7569.
+	t          *Transport
+	conn       net.Conn
+	br         *bufio.Reader       // from conn
+	bw         *bufio.Writer       // to conn
+	nwrite     int64               // bytes written
+	reqch      chan requestAndChan // written by roundTrip; read by readLoop
+	writech    chan writeRequest   // written by roundTrip; read by writeLoop
+	closech    chan struct{}       // closed when conn closed
+	sawEOF     bool                // whether we've seen EOF from conn; owned by readLoop
+	readLimit  int64               // bytes allowed to be read; owned by readLoop
 	writeErrCh chan error
 
 	writeLoopDone chan struct{} // closed when write loop ends
@@ -68,10 +41,6 @@ type persistConn struct {
 	canceledErr          error // set non-nil if conn is canceled
 	broken               bool  // an error has happened on this connection; marked broken so it's not reused.
 	reused               bool  // whether conn has had successful request/response and is being reused.
-	// mutateHeaderFunc is an optional func to modify extra
-	// headers on each outbound request before it's written. (the
-	// original Request given to RoundTrip is not modified)
-	mutateHeaderFunc func(Header)
 }
 
 func (pc *persistConn) maxHeaderResponseSize() int64 {
@@ -196,7 +165,7 @@ func (pc *persistConn) mapRoundTripError(req *transportRequest, startBytesWritte
 		if pc.nwrite == startBytesWritten {
 			return nothingWrittenError{err}
 		}
-		return fmt.Errorf("net/http: HTTP/1.x transport connection broken: %v", err)
+		return fmt.Errorf("transport connection broken: %v", err)
 	}
 	return err
 }
@@ -251,7 +220,16 @@ func (pc *persistConn) readLoop() {
 
 		var resp *Response
 		if err == nil {
-			resp, err = pc.readResponse(rc, trace)
+			if trace != nil && trace.GotFirstResponseByte != nil {
+				if peek, err := pc.br.Peek(1); err == nil && len(peek) == 1 {
+					trace.GotFirstResponseByte()
+				}
+			}
+
+			resp, err = readResponse(pc.br)
+			if resp != nil {
+				resp.Request = rc.req
+			}
 		} else {
 			err = transportReadFromServerError{err}
 			closeErr = err
@@ -275,42 +253,6 @@ func (pc *persistConn) readLoop() {
 		pc.numExpectedResponses--
 		pc.mu.Unlock()
 
-		hasBody := rc.req.Method != "HEAD" && resp.ContentLength != 0
-
-		if resp.Close || rc.req.Close || resp.StatusCode <= 199 {
-			// Don't do keep-alive on error if either party requested a close
-			// or we get an unexpected informational (1xx) response.
-			// StatusCode 100 is already handled above.
-			alive = false
-		}
-
-		if !hasBody {
-			pc.t.setReqCanceler(rc.req, nil)
-
-			// Put the idle conn back into the pool before we send the response
-			// so if they process it quickly and make another request, they'll
-			// get this same conn. But we use the unbuffered channel 'rc'
-			// to guarantee that persistConn.roundTrip got out of its select
-			// potentially waiting for this persistConn to close.
-			// but after
-			alive = alive &&
-				!pc.sawEOF &&
-				pc.wroteRequest() &&
-				tryPutIdleConn(trace)
-
-			select {
-			case rc.ch <- responseAndError{res: resp}:
-			case <-rc.callerGone:
-				return
-			}
-
-			// Now that they've read from the unbuffered channel, they're safely
-			// out of the select that also waits on this goroutine to die, so
-			// we're allowed to exit now if needed (if alive is false)
-			testHookReadLoopBeforeNextRead()
-			continue
-		}
-
 		waitForBodyRead := make(chan bool, 2)
 		body := &bodyEOFSignal{
 			body: resp.Body,
@@ -333,15 +275,7 @@ func (pc *persistConn) readLoop() {
 				return err
 			},
 		}
-
 		resp.Body = body
-		if rc.addedGzip && strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
-			resp.Body = &gzipReader{body: body}
-			resp.Header.Del("Content-Encoding")
-			resp.Header.Del("Content-Length")
-			resp.ContentLength = -1
-			resp.Uncompressed = true
-		}
 
 		select {
 		case rc.ch <- responseAndError{res: resp}:
@@ -354,7 +288,6 @@ func (pc *persistConn) readLoop() {
 		// reading the response body. (or for cancelation or death)
 		select {
 		case bodyEOF := <-waitForBodyRead:
-			pc.t.setReqCanceler(rc.req, nil) // before pc might return to idle pool
 			alive = alive &&
 				bodyEOF &&
 				!pc.sawEOF &&
@@ -363,12 +296,8 @@ func (pc *persistConn) readLoop() {
 			if bodyEOF {
 				eofc <- struct{}{}
 			}
-		case <-rc.req.Cancel:
-			alive = false
-			pc.t.CancelRequest(rc.req)
 		case <-rc.req.Context().Done():
 			alive = false
-			pc.t.cancelRequest(rc.req, rc.req.Context().Err())
 		case <-pc.closech:
 			alive = false
 		}
@@ -393,81 +322,6 @@ func (pc *persistConn) readLoopPeekFailLocked(peekErr error) {
 	}
 }
 
-// readResponse reads an HTTP response (or two, in the case of "Expect:
-// 100-continue") from the server. It returns the final non-100 one.
-// trace is optional.
-func (pc *persistConn) readResponse(rc requestAndChan, trace *httptrace.ClientTrace) (resp *Response, err error) {
-	if trace != nil && trace.GotFirstResponseByte != nil {
-		if peek, err := pc.br.Peek(1); err == nil && len(peek) == 1 {
-			trace.GotFirstResponseByte()
-		}
-	}
-	num1xx := 0               // number of informational 1xx headers received
-	const max1xxResponses = 5 // arbitrary bound on number of informational responses
-
-	continueCh := rc.continueCh
-	for {
-		resp, err = ReadResponse(pc.br, rc.req)
-		if err != nil {
-			return
-		}
-		resCode := resp.StatusCode
-		if continueCh != nil {
-			if resCode == 100 {
-				if trace != nil && trace.Got100Continue != nil {
-					trace.Got100Continue()
-				}
-				continueCh <- struct{}{}
-				continueCh = nil
-			} else if resCode >= 200 {
-				close(continueCh)
-				continueCh = nil
-			}
-		}
-		is1xx := 100 <= resCode && resCode <= 199
-		// treat 101 as a terminal status, see issue 26161
-		is1xxNonTerminal := is1xx && resCode != StatusSwitchingProtocols
-		if is1xxNonTerminal {
-			num1xx++
-			if num1xx > max1xxResponses {
-				return nil, errors.New("net/http: too many 1xx informational responses")
-			}
-			pc.readLimit = pc.maxHeaderResponseSize() // reset the limit
-			if trace != nil && trace.Got1xxResponse != nil {
-				if err := trace.Got1xxResponse(resCode, textproto.MIMEHeader(resp.Header)); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		break
-	}
-	resp.TLS = pc.tlsState
-	return
-}
-
-// waitForContinue returns the function to block until
-// any response, timeout or connection close. After any of them,
-// the function returns a bool which indicates if the body should be sent.
-func (pc *persistConn) waitForContinue(continueCh <-chan struct{}) func() bool {
-	if continueCh == nil {
-		return nil
-	}
-	return func() bool {
-		timer := time.NewTimer(pc.t.ExpectContinueTimeout)
-		defer timer.Stop()
-
-		select {
-		case _, ok := <-continueCh:
-			return ok
-		case <-timer.C:
-			return true
-		case <-pc.closech:
-			return false
-		}
-	}
-}
-
 // nothingWrittenError wraps a write errors which ended up writing zero bytes.
 type nothingWrittenError struct {
 	error
@@ -479,18 +333,7 @@ func (pc *persistConn) writeLoop() {
 		select {
 		case wr := <-pc.writech:
 			startBytesWritten := pc.nwrite
-			err := wr.req.Request.write(pc.bw, pc.isProxy, wr.req.extra, pc.waitForContinue(wr.continueCh))
-			if bre, ok := err.(requestBodyReadError); ok {
-				err = bre.error
-				// Errors reading from the user's
-				// Request.Body are high priority.
-				// Set it here before sending on the
-				// channels below or calling
-				// pc.close() which tears town
-				// connections and causes other
-				// errors.
-				wr.req.setError(err)
-			}
+			err := wr.req.Request.write(pc.bw)
 			if err == nil {
 				err = pc.bw.Flush()
 			}
@@ -556,17 +399,6 @@ type requestAndChan struct {
 	req *Request
 	ch  chan responseAndError // unbuffered; always send in select on callerGone
 
-	// whether the Transport (as opposed to the user client code)
-	// added the Accept-Encoding gzip header. If the Transport
-	// set it, only then do we transparently decode the gzip.
-	addedGzip bool
-
-	// Optional blocking chan for Expect: 100-continue (for send).
-	// If the request has an "Expect: 100-continue" header and
-	// the server responds 100 Continue, readLoop send a value
-	// to writeLoop via this chan.
-	continueCh chan<- struct{}
-
 	callerGone <-chan struct{} // closed when roundTrip caller has returned
 }
 
@@ -577,11 +409,6 @@ type requestAndChan struct {
 type writeRequest struct {
 	req *transportRequest
 	ch  chan<- error
-
-	// Optional blocking chan for Expect: 100-continue (for receive).
-	// If not nil, writeLoop blocks sending request body until
-	// it receives from this chan.
-	continueCh <-chan struct{}
 }
 
 type httpError struct {
@@ -593,9 +420,8 @@ func (e *httpError) Error() string   { return e.err }
 func (e *httpError) Timeout() bool   { return e.timeout }
 func (e *httpError) Temporary() bool { return true }
 
-var errTimeout error = &httpError{err: "net/http: timeout awaiting response headers", timeout: true}
-var errRequestCanceled = errors.New("net/http: request canceled")
-var errRequestCanceledConn = errors.New("net/http: request canceled while waiting for connection") // TODO: unify?
+var errTimeout error = &httpError{err: "timeout awaiting response headers", timeout: true}
+var errRequestCanceled = errors.New("request canceled")
 
 func nop() {}
 
@@ -613,61 +439,13 @@ var (
 
 func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err error) {
 	testHookEnterRoundTrip()
-	if !pc.t.replaceReqCanceler(req.Request, pc.cancelRequest) {
-		pc.t.putOrCloseIdleConn(pc)
-		return nil, errRequestCanceled
-	}
+
 	pc.mu.Lock()
 	pc.numExpectedResponses++
-	headerFn := pc.mutateHeaderFunc
 	pc.mu.Unlock()
-
-	if headerFn != nil {
-		headerFn(req.extraHeaders())
-	}
-
-	// Ask for a compressed version if the caller didn't set their
-	// own value for Accept-Encoding. We only attempt to
-	// uncompress the gzip stream if we were the layer that
-	// requested it.
-	requestedGzip := false
-	if !pc.t.DisableCompression &&
-		req.Header.Get("Accept-Encoding") == "" &&
-		req.Header.Get("Range") == "" &&
-		req.Method != "HEAD" {
-		// Request gzip only, not deflate. Deflate is ambiguous and
-		// not as universally supported anyway.
-		// See: http://www.gzip.org/zlib/zlib_faq.html#faq38
-		//
-		// Note that we don't request this for HEAD requests,
-		// due to a bug in nginx:
-		//   https://trac.nginx.org/nginx/ticket/358
-		//   https://golang.org/issue/5522
-		//
-		// We don't request gzip if the request is for a range, since
-		// auto-decoding a portion of a gzipped document will just fail
-		// anyway. See https://golang.org/issue/8923
-		requestedGzip = true
-		req.extraHeaders().Set("Accept-Encoding", "gzip")
-	}
-
-	var continueCh chan struct{}
-	if req.ProtoAtLeast(1, 1) && req.Body != nil && req.expectsContinue() {
-		continueCh = make(chan struct{}, 1)
-	}
-
-	if pc.t.DisableKeepAlives {
-		req.extraHeaders().Set("Connection", "close")
-	}
 
 	gone := make(chan struct{})
 	defer close(gone)
-
-	defer func() {
-		if err != nil {
-			pc.t.setReqCanceler(req.Request, nil)
-		}
-	}()
 
 	const debugRoundTrip = false
 
@@ -676,19 +454,16 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 	// request body.
 	startBytesWritten := pc.nwrite
 	writeErrCh := make(chan error, 1)
-	pc.writech <- writeRequest{req, writeErrCh, continueCh}
+	pc.writech <- writeRequest{req, writeErrCh}
 
 	resc := make(chan responseAndError)
 	pc.reqch <- requestAndChan{
 		req:        req.Request,
 		ch:         resc,
-		addedGzip:  requestedGzip,
-		continueCh: continueCh,
 		callerGone: gone,
 	}
 
 	var respHeaderTimer <-chan time.Time
-	cancelChan := req.Request.Cancel
 	ctxDoneChan := req.Context().Done()
 	for {
 		testHookWaitResLoop()
@@ -731,12 +506,7 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 				return nil, pc.mapRoundTripError(req, startBytesWritten, re.err)
 			}
 			return re.res, nil
-		case <-cancelChan:
-			pc.t.CancelRequest(req.Request)
-			cancelChan = nil
 		case <-ctxDoneChan:
-			pc.t.cancelRequest(req.Request, req.Context().Err())
-			cancelChan = nil
 			ctxDoneChan = nil
 		}
 	}
@@ -778,39 +548,9 @@ func (pc *persistConn) closeLocked(err error) {
 	pc.broken = true
 	if pc.closed == nil {
 		pc.closed = err
-		if pc.alt != nil {
-			// Do nothing; can only get here via getConn's
-			// handlePendingDial's putOrCloseIdleConn when
-			// it turns out the abandoned connection in
-			// flight ended up negotiating an alternate
-			// protocol. We don't use the connection
-			// freelist for http2. That's done by the
-			// alternate protocol's RoundTripper.
-		} else {
-			pc.conn.Close()
-			close(pc.closech)
-		}
+		pc.conn.Close()
+		close(pc.closech)
 	}
-	pc.mutateHeaderFunc = nil
-}
-
-var portMap = map[string]string{
-	"http":   "80",
-	"https":  "443",
-	"socks5": "1080",
-}
-
-// canonicalAddr returns url.Host but always with a ":port" suffix
-func canonicalAddr(url *url.URL) string {
-	addr := url.Hostname()
-	if v, err := idnaASCII(addr); err == nil {
-		addr = v
-	}
-	port := url.Port()
-	if port == "" {
-		port = portMap[url.Scheme]
-	}
-	return net.JoinHostPort(addr, port)
 }
 
 // bodyEOFSignal is used by the HTTP/1 transport when reading response
@@ -882,51 +622,6 @@ func (es *bodyEOFSignal) condfn(err error) error {
 	return err
 }
 
-// gzipReader wraps a response body so it can lazily
-// call gzip.NewReader on the first call to Read
-type gzipReader struct {
-	body *bodyEOFSignal // underlying HTTP/1 response body framing
-	zr   *gzip.Reader   // lazily-initialized gzip reader
-	zerr error          // any error from gzip.NewReader; sticky
-}
-
-func (gz *gzipReader) Read(p []byte) (n int, err error) {
-	if gz.zr == nil {
-		if gz.zerr == nil {
-			gz.zr, gz.zerr = gzip.NewReader(gz.body)
-		}
-		if gz.zerr != nil {
-			return 0, gz.zerr
-		}
-	}
-
-	gz.body.mu.Lock()
-	if gz.body.closed {
-		err = errReadOnClosedResBody
-	}
-	gz.body.mu.Unlock()
-
-	if err != nil {
-		return 0, err
-	}
-	return gz.zr.Read(p)
-}
-
-func (gz *gzipReader) Close() error {
-	return gz.body.Close()
-}
-
-type readerAndCloser struct {
-	io.Reader
-	io.Closer
-}
-
-type tlsHandshakeTimeoutError struct{}
-
-func (tlsHandshakeTimeoutError) Timeout() bool   { return true }
-func (tlsHandshakeTimeoutError) Temporary() bool { return true }
-func (tlsHandshakeTimeoutError) Error() string   { return "net/http: TLS handshake timeout" }
-
 // fakeLocker is a sync.Locker which does nothing. It's used to guard
 // test-only fields when not under test, to avoid runtime atomic
 // overhead.
@@ -935,12 +630,18 @@ type fakeLocker struct{}
 func (fakeLocker) Lock()   {}
 func (fakeLocker) Unlock() {}
 
-// clneTLSConfig returns a shallow clone of cfg, or a new zero tls.Config if
-// cfg is nil. This is safe to call even if cfg is in active use by a TLS
-// client or server.
-func cloneTLSConfig(cfg *tls.Config) *tls.Config {
-	if cfg == nil {
-		return &tls.Config{}
-	}
-	return cfg.Clone()
+// persistConnWriter is the io.Writer written to by pc.bw.
+// It accumulates the number of bytes written to the underlying conn,
+// so the retry logic can determine whether any bytes made it across
+// the wire.
+// This is exactly 1 pointer field wide so it can go into an interface
+// without allocation.
+type persistConnWriter struct {
+	pc *persistConn
+}
+
+func (w persistConnWriter) Write(p []byte) (n int, err error) {
+	n, err = w.pc.conn.Write(p)
+	w.pc.nwrite += int64(n)
+	return
 }

@@ -14,7 +14,9 @@ type SizedReader interface {
 
 type Request struct {
 	Header map[string][]string
-	Body SizedReader
+	Body   SizedReader
+
+	GetBody func() (SizedReader, error) // for rewind
 
 	ctx context.Context
 }
@@ -39,7 +41,11 @@ func (r *Request) write(w io.Writer) error {
 	return writeStdin(w, &bodyBuf, requestID, bufio.NewReader(r.Body))
 }
 
-func (r *Request) WithContext(ctx context.Context) (*Request) {
+func (r *Request) Context() context.Context {
+	return r.ctx
+}
+
+func (r *Request) WithContext(ctx context.Context) *Request {
 	r.ctx = ctx
 	return r
 }
@@ -61,3 +67,10 @@ func (r *Request) GetRequestId() (string, bool) {
 	return "", false
 }
 
+func (r *Request) isReplayable() bool {
+	return true
+}
+
+func (r *Request) closeBody() {
+
+}
