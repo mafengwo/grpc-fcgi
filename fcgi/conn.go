@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/net/http/httpguts"
 	"io"
 	"net"
 	"sync"
@@ -100,11 +101,19 @@ func (pc *persistConn) readLoop() {
 
 		pc.logDebug(zap.DebugLevel, "waiting for response")
 		resp, err := readResponse(pc.br)
+
 		pc.logDebug(zap.DebugLevel, "read response result: %v", err)
 		if err != io.EOF {
 			if err == nil { // which means all responses returned, connection drained
 				pc.logDebug(zap.DebugLevel, "put into idle list")
-				pc.t.putIdleConn(pc)
+
+				pc.logDebug(zap.InfoLevel, "got connection header: %+v", resp.Headers)
+				if connHeader, ok := resp.Headers["Connection"];
+					ok && httpguts.HeaderValuesContainsToken(connHeader, "close") {
+					pc.logDebug(zap.InfoLevel, "got connection header: %+v", connHeader)
+				} else {
+					pc.t.putIdleConn(pc)
+				}
 			}
 
 			rc := <-pc.reqch

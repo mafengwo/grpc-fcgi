@@ -1,15 +1,15 @@
 package grpc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"net/http/httptrace"
 	"strings"
 	"time"
 )
@@ -21,7 +21,7 @@ type request struct {
 	method        string
 	requestLength int
 	metadata       map[string][]string
-	body          *bytes.Reader
+	body          []byte
 
 	roundTripTime  time.Duration
 	upstreamTime   time.Duration
@@ -46,7 +46,9 @@ func readRequest(stream grpc.ServerStream, r *request) error {
 	if err := stream.RecvMsg(f); err != nil {
 		return errors.New(fmt.Sprintf("RecvMsg failed: %s", err))
 	}
-	r.body = bytes.NewReader(f.payload)
+
+	r.body = f.payload[:]
+	r.requestLength = int(len(r.body))
 
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
@@ -60,7 +62,6 @@ func readRequest(stream grpc.ServerStream, r *request) error {
 	}
 	r.metadata = md
 
-	r.requestLength = int(r.body.Size())
 	return nil
 }
 
@@ -75,7 +76,7 @@ func getRequestId(stream grpc.ServerStream) string {
 	return uuid.New().String()
 }
 
-func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
+func (r *request) toFcgiRequest(opts *FcgiOptions) (*transport.Request) {
 	h := map[string][]string{
 		"REQUEST_METHOD":    {"POST"},
 		"SERVER_PROTOCOL":   {"HTTP/2.0"},
@@ -92,9 +93,41 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
 	}
 
-	req := &fcgi.Request{
+	req := &transport.Request{
 		Header: h,
 		Body:   r.body,
 	}
-	return req.WithContext(r.ctx).WithRequestId(r.requestID)
+
+	ct := &httptrace.ClientTrace{
+		GetConn: func(hostPort string){
+			r.accessLogger = r.accessLogger.With(zap.Time("GetConn", time.Now()))
+		},
+		GotConn: func(conn httptrace.GotConnInfo) {
+			r.accessLogger = r.accessLogger.With(zap.Time("GotConn", time.Now()))
+		},
+		PutIdleConn: func(err error) {
+			r.accessLogger = r.accessLogger.With(zap.Time("PutIdle", time.Now()))
+			if err != nil {
+				r.accessLogger = r.accessLogger.With(zap.String("PutIdleError", err.Error()))
+			}
+		},
+		GotFirstResponseByte: func() {
+			r.accessLogger = r.accessLogger.With(zap.Time("GotFirstResponseByte", time.Now()))
+		},
+		ConnectStart: func(network, addr string) {
+			r.accessLogger = r.accessLogger.With(zap.Time("ConnectStart", time.Now()))
+		},
+		ConnectDone: func(network, addr string, err error) {
+			r.accessLogger = r.accessLogger.With(zap.Time("ConnectDone", time.Now()))
+		},
+		WroteHeaders: func() {
+			r.accessLogger = r.accessLogger.With(zap.Time("WroteHeaders", time.Now()))
+		},
+		WroteRequest: func(reqInfo httptrace.WroteRequestInfo) {
+			r.accessLogger = r.accessLogger.With(zap.Time("WroteRequest", time.Now()))
+		},
+	}
+	ctx := httptrace.WithClientTrace(r.ctx, ct)
+
+	return req.WithContext(ctx).WithRequestId(r.requestID)
 }

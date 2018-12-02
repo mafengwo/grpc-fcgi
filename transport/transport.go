@@ -79,7 +79,7 @@ func (tr *transportRequest) setError(err error) {
 }
 
 // roundTrip implements a RoundTripper over HTTP.
-func (t *Transport) roundTrip(req *Request) (*Response, error) {
+func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 	ctx := req.Context()
 	trace := httptrace.ContextClientTrace(ctx)
 
@@ -111,17 +111,6 @@ func (t *Transport) roundTrip(req *Request) (*Response, error) {
 			return nil, err
 		}
 		testHookRoundTripRetried()
-
-		// Rewind the body if we're able to.
-		if req.GetBody != nil {
-			newReq := *req
-			var err error
-			newReq.Body, err = req.GetBody()
-			if err != nil {
-				return nil, err
-			}
-			req = &newReq
-		}
 	}
 }
 
@@ -139,13 +128,12 @@ func (pc *persistConn) shouldRetryRequest(req *Request, err error) bool {
 		// our request (as opposed to sending an error).
 		return false
 	}
-	if _, ok := err.(nothingWrittenError); ok {
-		return req.GetBody != nil
-	}
+
 	if !req.isReplayable() {
 		// Don't retry non-idempotent requests.
 		return false
 	}
+
 	if _, ok := err.(transportReadFromServerError); ok {
 		// We got some non-EOF net.Conn.Read failure reading
 		// the 1st response byte from the server.
@@ -198,7 +186,7 @@ func (t *Transport) putOrCloseIdleConn(pconn *persistConn) {
 	}
 }
 
-func (t *Transport) maxIdleConnsPerHost() int {
+func (t *Transport) maxIdleConns() int {
 	if v := t.MaxIdleConns; v != 0 {
 		return v
 	}
@@ -235,7 +223,7 @@ func (t *Transport) tryPutIdleConn(pconn *persistConn) error {
 		t.idleConn = []*persistConn{}
 	}
 	idles := t.idleConn
-	if len(idles) >= t.maxIdleConnsPerHost() {
+	if len(idles) >= t.maxIdleConns() {
 		return errTooManyIdleHost
 	}
 	for _, exist := range idles {
@@ -466,9 +454,11 @@ func (t *Transport) decHostConnCount() {
 	default:
 		// close channel before deleting avoids getConn waiting forever in
 		// case getConn has reference to channel but hasn't started waiting.
+		/*
 		if t.connPerHostAvailable != nil {
 			close(t.connPerHostAvailable)
 		}
+		*/
 	}
 }
 

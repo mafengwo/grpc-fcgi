@@ -4,13 +4,15 @@ import (
 	"flag"
 	"gitlab.mfwdev.com/service/grpc-fcgi/grpc"
 	"gitlab.mfwdev.com/service/grpc-fcgi/log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
 var (
-	configFile = flag.String( "f", "", "config file path")
+	configFile = flag.String("f", "", "config file path")
 )
 
 func main() {
@@ -27,7 +29,7 @@ func main() {
 
 	logger, err := log.NewLogger(&log.Options{
 		AccessLogPath: options.Log.AccessLogPath,
-		ErrorLogPath: options.Log.ErrorLogPath,
+		ErrorLogPath:  options.Log.ErrorLogPath,
 		ErrorLogLevel: options.Log.ErrorLogLevel,
 		ErrorLogTrace: options.Log.ErrorLogTrace,
 	})
@@ -44,6 +46,12 @@ func main() {
 		logger.ErrorLogger().Info("signal received, prepare to shutdown...")
 		s.GracefulStop()
 		logger.ErrorLogger().Info("server has been shutdown")
+	}()
+
+	// pprof
+	go func() {
+		err := http.ListenAndServe("0.0.0.0:9876", nil)
+		logger.ErrorLogger().Info("listening 9876 for pprof: " + err.Error())
 	}()
 
 	logger.ErrorLogger().Info("starting to serve")

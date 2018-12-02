@@ -45,7 +45,7 @@ func TestTransport_GetConnBlocked(t *testing.T) {
 	unblocked := make(chan bool)
 	go func() {
 		for i := 0; i < 11; i++ {
-			_, err := trans.getConn(nil)
+			_, err := trans.getConn(nil, nil)
 			if err != nil {
 				t.Fatalf("get conn error: %v", err)
 			}
@@ -68,7 +68,7 @@ func TestTransport_GetConnBlockedAndFree(t *testing.T) {
 	unblocked := make(chan bool)
 	go func() {
 		for i := 0; i < 11; i++ {
-			_, err := trans.getConn(nil)
+			_, err := trans.getConn(nil, nil)
 			if err != nil {
 				t.Fatalf("get conn error: %v", err)
 			}
@@ -110,13 +110,7 @@ func newTransport() *Transport {
 		Dial: func(network, addr string) (net.Conn, error) {
 			return net.Dial("tcp", "127.0.0.1:9000")
 		},
-		LogFunc: func(fields map[string]string) {
-			var args []zap.Field
-			for k, v := range fields {
-				args = append(args, zap.String(k, v))
-			}
-			al.Info("", args...)
-		},
+		Logger:al,
 	}
 }
 

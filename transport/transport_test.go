@@ -1,8 +1,8 @@
 package transport
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,11 +10,29 @@ import (
 
 func TestTransport_RoundTrip(t *testing.T) {
 	tran := newTransport()
-	resp, err := tran.roundTrip(newRequest())
+	resp, err := tran.RoundTrip(newRequest())
 	if err != nil {
 		t.Errorf(err.Error())
 	} else {
 		t.Logf("response: %v", resp)
+	}
+}
+
+
+var (
+	tran = newTransport()
+)
+
+func BenchmarkTransport_RoundTrip(b *testing.B) {
+	fmt.Println("start roundtrip")
+	for i := 0; i < b.N; i++ {
+		_, err := tran.RoundTrip(newRequest())
+		if err != nil {
+			b.Fatalf(err.Error())
+			b.FailNow()
+		} else {
+			//b.Logf("response: %v", resp)
+		}
 	}
 }
 
@@ -26,7 +44,7 @@ func newTransport() *Transport {
 }
 
 func newRequest() *Request {
-	dc, err := filepath.Abs("./php")
+	dc, err := filepath.Abs("../fcgi/php")
 	if err != nil {
 		panic("cannot get php path")
 	}
@@ -44,7 +62,7 @@ func newRequest() *Request {
 			"DOCUMENT_ROOT":     {dc},
 			"SCRIPT_FILENAME":   {script},
 		},
-		Body: bytes.NewReader([]byte{0x01}),
+		Body: []byte{0x01},
 	}
 	ctx, _ := context.WithTimeout(context.Background(), time.Second * 3)
 	return r.WithContext(ctx)
