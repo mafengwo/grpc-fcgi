@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"gitlab.mfwdev.com/service/grpc-fcgi/transport"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -76,7 +76,7 @@ func getRequestId(stream grpc.ServerStream) string {
 	return uuid.New().String()
 }
 
-func (r *request) toFcgiRequest(opts *FcgiOptions) (*transport.Request) {
+func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
 		"REQUEST_METHOD":    {"POST"},
 		"SERVER_PROTOCOL":   {"HTTP/2.0"},
@@ -93,7 +93,7 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*transport.Request) {
 		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
 	}
 
-	req := &transport.Request{
+	req := &fcgi.Request{
 		Header: h,
 		Body:   r.body,
 	}

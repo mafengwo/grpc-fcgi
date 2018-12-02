@@ -1,4 +1,4 @@
-package transport
+package fcgi
 
 import "container/list"
 

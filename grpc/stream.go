@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gitlab.mfwdev.com/service/grpc-fcgi/log"
-	"gitlab.mfwdev.com/service/grpc-fcgi/transport"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,7 +17,7 @@ import (
 
 type streamHandler struct {
 	fcgiOptions *FcgiOptions
-	fcgiClient  *transport.Transport
+	fcgiClient  *fcgi.Transport
 
 	queue           chan int
 	timeout         time.Duration
@@ -116,7 +116,7 @@ func (sh *streamHandler) waitingForProxy() func() {
 	}
 }
 
-func (sh *streamHandler) sendResponse(stream grpc.ServerStream, resp *transport.Response) *status.Status {
+func (sh *streamHandler) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) *status.Status {
 	// TODO: convert resp code to grpc code
 	statusCode, err := resp.GetStatusCode()
 	if err != nil {

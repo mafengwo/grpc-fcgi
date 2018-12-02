@@ -3,283 +3,506 @@ package fcgi
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"log"
 	"net"
+	"net/http/httptrace"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
-type Transport struct {
-	idleConnCh chan *persistConn
-	idleMu     sync.Mutex
-	idleConn   []*persistConn
+// DefaultMaxIdleConnsPerHost is the default value of Transport's
+// MaxIdleConnsPerHost.
+const DefaultMaxIdleConnsPerHost = 2
 
-	MaxConn int
+// connsPerHostClosedCh is a closed channel used by MaxConnsPerHost
+// for the property that receives from a closed channel return the
+// zero value.
+var connsPerHostClosedCh = make(chan struct{})
 
-	Address              string
-	Dial                 func(network, addr string) (net.Conn, error)
-	ConnectionMaxRequest int
-	Logger               *zap.Logger
-
-	connCountMu   sync.Mutex
-	connCount     int
-	connAvailable chan struct{}
+func init() {
+	close(connsPerHostClosedCh)
 }
 
+type Transport struct {
+	idleMu     sync.Mutex
+	idleConn   []*persistConn // most recently used at end
+	idleConnCh chan *persistConn
+	idleLRU    connLRU
+
+	reqMu sync.Mutex
+
+	altMu    sync.Mutex   // guards changing altProto only
+	altProto atomic.Value // of nil or map[string]RoundTripper, key is URI scheme
+
+	connCountMu          sync.Mutex
+	connCount            int
+	connPerHostAvailable chan struct{}
+
+	Address           string
+	DisableKeepAlives bool
+	MaxIdleConns      int
+	MaxConns          int
+	IdleConnTimeout   time.Duration
+	// ResponseHeaderTimeout, if non-zero, specifies the amount of
+	// time to wait for a server's response headers after fully
+	// writing the request (including its body, if any). This
+	// time does not include the time to read the response body.
+	ResponseHeaderTimeout time.Duration
+	// MaxResponseHeaderBytes specifies a limit on how many
+	// response bytes are allowed in the server's response
+	// header.
+	//
+	// Zero means to use a default limit.
+	MaxResponseHeaderBytes int64
+}
+
+// transportRequest is a wrapper around a *Request that adds
+// optional extra headers to write and stores any error to return
+// from roundTrip.
+type transportRequest struct {
+	*Request                     // original request, not to be mutated
+	trace *httptrace.ClientTrace // optional
+
+	mu  sync.Mutex // guards err
+	err error      // first setError value for mapRoundTripError to consider
+}
+
+func (tr *transportRequest) setError(err error) {
+	tr.mu.Lock()
+	if tr.err == nil {
+		tr.err = err
+	}
+	tr.mu.Unlock()
+}
+
+// roundTrip implements a RoundTripper over HTTP.
 func (t *Transport) RoundTrip(req *Request) (*Response, error) {
+	ctx := req.Context()
+	trace := httptrace.ContextClientTrace(ctx)
+
 	for {
-		//TODO context.Done()
-		conn, err := t.getConn(req, nil)
+		select {
+		case <-ctx.Done():
+			req.closeBody()
+			return nil, ctx.Err()
+		default:
+		}
+
+		// treq gets modified by roundTrip, so we need to recreate for each retry.
+		treq := &transportRequest{Request: req, trace: trace}
+
+		pconn, err := t.getConn(treq)
 		if err != nil {
+			req.closeBody()
 			return nil, err
 		}
-		t.logRequest(req, zap.DebugLevel, "get connection %d", conn.id)
 
-		startBytesWritten := conn.nwrite
-
-		resp, err := conn.roundTrip(req)
+		resp, err := pconn.roundTrip(treq)
 		if err == nil {
-			t.logRequest(req, zap.DebugLevel, "connection %d finished request well", conn.id)
-			return resp, err
+			return resp, nil
 		}
-
-		if conn.nwrite != startBytesWritten {
-			t.logRequest(req, zap.DebugLevel, "connection %d execute request error: %v", conn.id, err)
+		if !pconn.shouldRetryRequest(req, err) {
+			if e, ok := err.(transportReadFromServerError); ok {
+				err = e.err
+			}
 			return nil, err
 		}
-
-		t.logRequest(req, zap.InfoLevel, "connection %d done nothing, retrying...", conn.id)
+		testHookRoundTripRetried()
 	}
 }
 
-func (t *Transport) getConn(req *Request, ctx context.Context) (*persistConn, error) {
-	// get idle connection
-	if pc := t.getIdleConn(req); pc != nil {
-		t.logRequest(req, zap.DebugLevel, "got idle conn: %d", pc.id)
+// shouldRetryRequest reports whether we should retry sending a failed
+// HTTP request on a new connection. The non-nil input error is the
+// error from roundTrip.
+func (pc *persistConn) shouldRetryRequest(req *Request, err error) bool {
+	if !pc.isReused() {
+		// This was a fresh connection. There's no reason the server
+		// should've hung up on us.
+		//
+		// Also, if we retried now, we could loop forever
+		// creating new connections and retrying if the server
+		// is just hanging up on us because it doesn't like
+		// our request (as opposed to sending an error).
+		return false
+	}
+
+	if !req.isReplayable() {
+		// Don't retry non-idempotent requests.
+		return false
+	}
+
+	if _, ok := err.(transportReadFromServerError); ok {
+		// We got some non-EOF net.Conn.Read failure reading
+		// the 1st response byte from the server.
+		return true
+	}
+	if err == errServerClosedIdle {
+		// The server replied with io.EOF while we were trying to
+		// read the response. Probably an unfortunately keep-alive
+		// timeout, just as the client was writing a request.
+		return true
+	}
+	return false // conservatively
+}
+
+// error values for debugging and testing, not seen by users.
+var (
+	errKeepAlivesDisabled = errors.New("putIdleConn: keep alives disabled")
+	errConnBroken         = errors.New("putIdleConn: connection is in bad state")
+	errTooManyIdle        = errors.New("putIdleConn: too many idle connections")
+	errTooManyIdleHost    = errors.New("putIdleConn: too many idle connections for host")
+	errReadLoopExiting    = errors.New("persistConn.readLoop exiting")
+	errIdleConnTimeout    = errors.New("idle connection timeout")
+
+	// errServerClosedIdle is not seen by users for idempotent requests, but may be
+	// seen by a user if the server shuts down an idle connection and sends its FIN
+	// in flight with already-written POST body bytes from the client.
+	// See https://github.com/golang/go/issues/19943#issuecomment-355607646
+	errServerClosedIdle = errors.New("http: server closed idle connection")
+)
+
+// transportReadFromServerError is used by Transport.readLoop when the
+// 1 byte peek read fails and we're actually anticipating a response.
+// Usually this is just due to the inherent keep-alive shut down race,
+// where the server closed the connection at the same time the client
+// wrote. The underlying err field is usually io.EOF or some
+// ECONNRESET sort of thing which varies by platform. But it might be
+// the user's custom net.Conn.Read error too, so we carry it along for
+// them to return from Transport.RoundTrip.
+type transportReadFromServerError struct {
+	err error
+}
+
+func (e transportReadFromServerError) Error() string {
+	return fmt.Sprintf("net/http: Transport failed to read from server: %v", e.err)
+}
+
+func (t *Transport) putOrCloseIdleConn(pconn *persistConn) {
+	if err := t.tryPutIdleConn(pconn); err != nil {
+		pconn.close(err)
+	}
+}
+
+func (t *Transport) maxIdleConns() int {
+	if v := t.MaxIdleConns; v != 0 {
+		return v
+	}
+	return DefaultMaxIdleConnsPerHost
+}
+
+// tryPutIdleConn adds pconn to the list of idle persistent connections awaiting
+// a new request.
+// If pconn is no longer needed or not in a good state, tryPutIdleConn returns
+// an error explaining why it wasn't registered.
+// tryPutIdleConn does not close pconn. Use putOrCloseIdleConn instead for that.
+func (t *Transport) tryPutIdleConn(pconn *persistConn) error {
+	if t.DisableKeepAlives || t.MaxIdleConns < 0 {
+		return errKeepAlivesDisabled
+	}
+	if pconn.isBroken() {
+		return errConnBroken
+	}
+
+	pconn.markReused()
+
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+
+	select {
+	case t.idleConnCh <- pconn:
+		// We're done with this pconn and somebody else is
+		// currently waiting for a conn of this type (they're
+		// actively dialing, but this conn is ready first).
+		return nil
+	default:
+	}
+	if t.idleConn == nil {
+		t.idleConn = []*persistConn{}
+	}
+	idles := t.idleConn
+	if len(idles) >= t.maxIdleConns() {
+		return errTooManyIdleHost
+	}
+	for _, exist := range idles {
+		if exist == pconn {
+			log.Fatalf("dup idle pconn %p in freelist", pconn)
+		}
+	}
+	t.idleConn = append(idles, pconn)
+	t.idleLRU.add(pconn)
+	if t.MaxIdleConns != 0 && t.idleLRU.len() > t.MaxIdleConns {
+		oldest := t.idleLRU.removeOldest()
+		oldest.close(errTooManyIdle)
+		t.removeIdleConnLocked(oldest)
+	}
+	if t.IdleConnTimeout > 0 {
+		if pconn.idleTimer != nil {
+			pconn.idleTimer.Reset(t.IdleConnTimeout)
+		} else {
+			pconn.idleTimer = time.AfterFunc(t.IdleConnTimeout, pconn.closeConnIfStillIdle)
+		}
+	}
+	pconn.idleAt = time.Now()
+	return nil
+}
+
+// getIdleConnCh returns a channel to receive and return idle
+func (t *Transport) getIdleConnCh() chan *persistConn {
+	if t.DisableKeepAlives {
+		return nil
+	}
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+	if t.idleConnCh == nil {
+		t.idleConnCh = make(chan *persistConn)
+	}
+	return t.idleConnCh
+}
+
+func (t *Transport) getIdleConn() (pconn *persistConn, idleSince time.Time) {
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+	for {
+		if t.idleConn == nil || len(t.idleConn) == 0 {
+			return nil, time.Time{}
+		}
+
+		if len(t.idleConn) == 1 {
+			pconn = t.idleConn[0]
+			t.idleConn = []*persistConn{}
+		} else {
+			// 2 or more cached connections; use the most
+			// recently used one at the end.
+			pconn = t.idleConn[len(t.idleConn)-1]
+			t.idleConn = t.idleConn[:len(t.idleConn)-1]
+		}
+		t.idleLRU.remove(pconn)
+		if pconn.isBroken() {
+			// There is a tiny window where this is
+			// possible, between the connecting dying and
+			// the persistConn readLoop calling
+			// Transport.removeIdleConn. Just skip it and
+			// carry on.
+			continue
+		}
+		return pconn, pconn.idleAt
+	}
+}
+
+// removeIdleConn marks pconn as dead.
+func (t *Transport) removeIdleConn(pconn *persistConn) {
+	t.idleMu.Lock()
+	defer t.idleMu.Unlock()
+	t.removeIdleConnLocked(pconn)
+}
+
+// t.idleMu must be held.
+func (t *Transport) removeIdleConnLocked(pconn *persistConn) {
+	if pconn.idleTimer != nil {
+		pconn.idleTimer.Stop()
+	}
+	t.idleLRU.remove(pconn)
+	pconns := t.idleConn
+	switch len(pconns) {
+	case 0:
+		// Nothing
+	case 1:
+		if pconns[0] == pconn {
+			t.idleConn = []*persistConn{}
+		}
+	default:
+		for i, v := range pconns {
+			if v != pconn {
+				continue
+			}
+			// Slide down, keeping most recently-used
+			// conns at the end.
+			copy(pconns[i:], pconns[i+1:])
+			t.idleConn = pconns[:len(pconns)-1]
+			break
+		}
+	}
+}
+
+// getConn dials and creates a new persistConn
+func (t *Transport) getConn(treq *transportRequest) (*persistConn, error) {
+	req := treq.Request
+	trace := treq.trace
+	ctx := req.Context()
+	if pc, idleSince := t.getIdleConn(); pc != nil {
+		if trace != nil && trace.GotConn != nil {
+			trace.GotConn(pc.gotIdleConnTrace(idleSince))
+		}
 		return pc, nil
 	}
 
-	t.logRequest(req, zap.DebugLevel, "no idle connection for now")
-	if t.MaxConn > 0 {
-		select {
-		case <-t.incConnCount(): // count below conn limit; proceed
-			t.logRequest(req, zap.DebugLevel, "connection num still under MaxConn limit")
-		case pc := <-t.getIdleConnCh():
-			t.logRequest(req, zap.DebugLevel, "get connection %d released", pc.id)
-			return pc, nil
-		}
-	}
-
-	// dial new connection if no idle connection available
 	type dialRes struct {
 		pc  *persistConn
 		err error
 	}
 	dialc := make(chan dialRes)
+
+	// Copy these hooks so we don't race on the postPendingDial in
+	// the goroutine we launch. Issue 11136.
+	testHookPrePendingDial := testHookPrePendingDial
+	testHookPostPendingDial := testHookPostPendingDial
+
+	handlePendingDial := func() {
+		testHookPrePendingDial()
+		go func() {
+			if v := <-dialc; v.err == nil {
+				t.putOrCloseIdleConn(v.pc)
+			} else {
+				t.decHostConnCount()
+			}
+			testHookPostPendingDial()
+		}()
+	}
+
+	if t.MaxConns > 0 {
+		select {
+		case <-t.incHostConnCount():
+			// count below conn per host limit; proceed
+		case pc := <-t.getIdleConnCh():
+			if trace != nil && trace.GotConn != nil {
+				trace.GotConn(httptrace.GotConnInfo{Conn: pc.conn, Reused: pc.isReused()})
+			}
+			return pc, nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+
 	go func() {
 		pc, err := t.dialConn(ctx)
 		dialc <- dialRes{pc, err}
 	}()
 
-	handlePendingDial := func() {
-		go func() {
-			if v := <-dialc; v.err == nil {
-				t.putIdleConn(v.pc)
-			} else {
-				t.logRequest(req, zap.DebugLevel, "release connection in pending")
-				t.decConnCount()
-			}
-		}()
-	}
-
+	idleConnCh := t.getIdleConnCh()
 	select {
-	case ds := <-dialc:
-		if ds.err != nil {
-			// Once dial failed. decrement the connection count
-			t.decConnCount()
-			t.logRequest(req, zap.ErrorLevel, "dial failed: %v", ds.err)
-		} else {
-			t.logRequest(req, zap.DebugLevel, "dial success, connection id: %d", ds.pc.id)
+	case v := <-dialc:
+		// Our dial finished.
+		if v.pc != nil {
+			if trace != nil && trace.GotConn != nil {
+				trace.GotConn(httptrace.GotConnInfo{Conn: v.pc.conn})
+			}
+			return v.pc, nil
 		}
-		return ds.pc, ds.err
-	case pc := <-t.getIdleConnCh():
+		// Our dial failed. See why to return a nicer error
+		// value.
+		t.decHostConnCount()
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		default:
+			// It wasn't an error due to cancelation, so
+			// return the original error message:
+			return nil, v.err
+		}
+	case pc := <-idleConnCh:
 		// Another request finished first and its net.Conn
 		// became available before our dial. Or somebody
 		// else's dial that they didn't use.
 		// But our dial is still going, so give it away
 		// when it finishes:
-		t.logRequest(req, zap.DebugLevel, "connection: %d released", pc.id)
 		handlePendingDial()
+		if trace != nil && trace.GotConn != nil {
+			trace.GotConn(httptrace.GotConnInfo{Conn: pc.conn, Reused: pc.isReused()})
+		}
 		return pc, nil
+	case <-req.Context().Done():
+		handlePendingDial()
+		return nil, req.Context().Err()
 	}
 }
 
-func (t *Transport) getIdleConnCh() chan *persistConn {
-	t.idleMu.Lock()
-	defer t.idleMu.Unlock()
-
-	if t.idleConnCh == nil {
-		t.idleConnCh = make(chan *persistConn)
-	}
-
-	return t.idleConnCh
-}
-
-func (t *Transport) getIdleConn(req *Request) *persistConn {
-	t.idleMu.Lock()
-	defer t.idleMu.Unlock()
-
-	for {
-		if t.idleConn == nil || len(t.idleConn) == 0 {
-			return nil
-		}
-
-		idleids := []int{}
-		for _, c := range t.idleConn {
-			idleids = append(idleids, c.id)
-		}
-		t.logRequest(req, zap.DebugLevel, "connection idle list: %v", idleids)
-
-		pc := t.idleConn[0] // get the LRU connection
-		t.idleConn = t.idleConn[1:]
-		if !pc.isBroken() {
-			return pc
-		}
-	}
-}
-
-// putIdleConn put conn into idleConn OR idleConnCh
-func (t *Transport) putIdleConn(pc *persistConn) {
-	t.idleMu.Lock()
-	defer t.idleMu.Unlock()
-
-	if pc.isBroken() {
-		//t.logRequest("connection %d be willing to put into idle list, but aborted for broken", pc.id)
-		return
-	}
-
-	// abort dying connection
-	if t.ConnectionMaxRequest > 0 && pc.getRequestNum() >= t.ConnectionMaxRequest {
-		return
-	}
-
-	select {
-	case t.idleConnCh <- pc:
-		// Done here means somebody is currently waiting,
-		// conn cannot put in idleConn in this situation
-		// t.logRequest("connection %d been taken by waiting task before put into idle list", pc.id)
-		return
-	default:
-	}
-
-	// t.logRequest("connection %d been put into idle list", pc.id)
-	if t.idleConn == nil {
-		t.idleConn = []*persistConn{}
-	}
-	t.idleConn = append(t.idleConn, pc)
-}
-
-func (t *Transport) dialConn(ctx context.Context) (*persistConn, error) {
-	netconn, err := t.Dial("tcp", t.Address)
-	if err != nil {
-		return nil, err
-	}
-
-	conn := &persistConn{
-		id:            newConnId(),
-		t:             t,
-		conn:          netconn,
-		reqch:         make(chan requestAndChan, 1),
-		writech:       make(chan writeRequestAndError, 1),
-		closech:       make(chan struct{}),
-		writeErrCh:    make(chan error, 1),
-		writeLoopDone: make(chan struct{}),
-	}
-	if t.Logger != nil {
-		conn.logger = t.Logger.With()
-	}
-	conn.br = bufio.NewReader(conn)
-	conn.bw = bufio.NewWriter(conn)
-
-	go conn.readLoop()
-	go conn.writeLoop()
-	go func() {
-		<-conn.closech
-		t.logRequest(nil, zap.DebugLevel, "release connection closed")
-		t.decConnCount()
-	}()
-
-	return conn, nil
-}
-
-var closedCh = make(chan struct{})
-
-// incConnCount increments the count of connections.
-// It returns an already-closed channel if the count
-// is not at its limit; otherwise it returns a channel which is
-// notified when the count is below the limit.
-func (t *Transport) incConnCount() <-chan struct{} {
-	if t.MaxConn <= 0 {
-		return closedCh
+// incHostConnCount increments the count of connections
+func (t *Transport) incHostConnCount() <-chan struct{} {
+	if t.MaxConns <= 0 {
+		return connsPerHostClosedCh
 	}
 
 	t.connCountMu.Lock()
 	defer t.connCountMu.Unlock()
-
-	if t.connCount >= t.MaxConn {
-		if t.connAvailable == nil {
-			t.connAvailable = make(chan struct{})
+	if t.connCount == t.MaxConns {
+		if t.connPerHostAvailable == nil {
+			t.connPerHostAvailable = make(chan struct{})
 		}
-		return t.connAvailable
+		return t.connPerHostAvailable
 	}
 
 	t.connCount++
-
-	return closedCh
+	return connsPerHostClosedCh
 }
 
-func (t *Transport) decConnCount() {
-	if t.MaxConn <= 0 {
+// decHostConnCount decrements the count of connections
+func (t *Transport) decHostConnCount() {
+	if t.MaxConns <= 0 {
 		return
 	}
 
 	t.connCountMu.Lock()
 	defer t.connCountMu.Unlock()
 
+	t.connCount--
 
 	select {
-	case t.connAvailable <- struct{}{}:
+	case t.connPerHostAvailable <- struct{}{}:
 	default:
-		t.connCount--
 		// close channel before deleting avoids getConn waiting forever in
 		// case getConn has reference to channel but hasn't started waiting.
-		// This could lead to more than MaxConnsPerHost in the unlikely case
-		// that > 1 go routine has fetched the channel but none started waiting.
 		/*
-		if t.connAvailable != nil {
-			close(t.connAvailable)
+		if t.connPerHostAvailable != nil {
+			close(t.connPerHostAvailable)
 		}
 		*/
 	}
 }
 
-func (t *Transport) logRequest(req *Request, level zapcore.Level, format string, args ...interface{}) {
-	if t.Logger != nil {
-		msg := fmt.Sprintf(format, args...)
-
-		fields := []zap.Field{
-			zap.String("layer", "transport"),
-		}
-		if req != nil {
-			if requestId, yes := req.GetRequestId(); yes {
-				fields = append(fields, zap.String("request_id", requestId))
-			}
-		}
-		t.Logger.Check(level, msg).Write(fields...)
-	}
+// connCloseListener wraps a connection, the transport that dialed it
+// and the connected-to host key so the host connection count can be
+// transparently decremented by whatever closes the embedded connection.
+type connCloseListener struct {
+	net.Conn
+	t        *Transport
+	didClose int32
 }
 
-func init() {
-	close(closedCh)
+func (c *connCloseListener) Close() error {
+	if atomic.AddInt32(&c.didClose, 1) != 1 {
+		return nil
+	}
+	err := c.Conn.Close()
+	c.t.decHostConnCount()
+	return err
+}
+
+func (t *Transport) dialConn(ctx context.Context) (*persistConn, error) {
+	pconn := &persistConn{
+		t:             t,
+		reqch:         make(chan requestAndChan, 1),
+		writech:       make(chan writeRequest, 1),
+		closech:       make(chan struct{}),
+		writeErrCh:    make(chan error, 1),
+		writeLoopDone: make(chan struct{}),
+	}
+
+	var defaultDialer net.Dialer
+	conn, err := defaultDialer.DialContext(ctx, "tcp", t.Address)
+	if err != nil {
+		return nil, err
+	}
+	pconn.conn = conn
+
+	if t.MaxConns > 0 {
+		pconn.conn = &connCloseListener{Conn: pconn.conn, t: t}
+	}
+	pconn.br = bufio.NewReader(pconn)
+	pconn.bw = bufio.NewWriter(persistConnWriter{pconn})
+	go pconn.readLoop()
+	go pconn.writeLoop()
+	return pconn, nil
 }

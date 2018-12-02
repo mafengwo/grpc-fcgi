@@ -5,7 +5,7 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/pkg/errors"
 	"gitlab.mfwdev.com/service/grpc-fcgi/log"
-	"gitlab.mfwdev.com/service/grpc-fcgi/transport"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
@@ -22,7 +22,7 @@ type Proxy struct {
 func NewProxy(opt *Options, logger *log.Logger) *Proxy {
 	sh := &streamHandler{
 		fcgiOptions: &opt.Fcgi,
-		fcgiClient: &transport.Transport{
+		fcgiClient: &fcgi.Transport{
 			MaxConns: opt.Fcgi.MaxConns,
 			MaxIdleConns: opt.Fcgi.MaxIdleConns,
 			Address: opt.Fcgi.Address,
