@@ -9,8 +9,6 @@ class ComposerStaticInitf9120996c65e702df20e143146a5b021
     public static $prefixLengthsPsr4 = array (
         'G' => 
         array (
-            'Google\\Protobuf\\' => 16,
-            'GPBMetadata\\Google\\Protobuf\\' => 28,
             'GPBMetadata\\' => 12,
         ),
         'F' => 
@@ -20,14 +18,6 @@ class ComposerStaticInitf9120996c65e702df20e143146a5b021
     );
 
     public static $prefixDirsPsr4 = array (
-        'Google\\Protobuf\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/google/protobuf/php/src/Google/Protobuf',
-        ),
-        'GPBMetadata\\Google\\Protobuf\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/google/protobuf/php/src/GPBMetadata/Google/Protobuf',
-        ),
         'GPBMetadata\\' => 
         array (
             0 => __DIR__ . '/../..' . '/GPBMetadata',

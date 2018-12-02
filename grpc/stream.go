@@ -3,9 +3,8 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
-	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"gitlab.mfwdev.com/service/grpc-fcgi/log"
+	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -28,15 +27,7 @@ type streamHandler struct {
 }
 
 func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream) error {
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		panic("failed to extract metadata")
-	}
-	if id, ok := md["index"]; ok {
-		fmt.Printf("\nclient id : %s\n", id[0])
-	}
-
-	reqid := uuid.New().String()
+	reqid := getRequestId(stream)
 	req := &request{
 		requestID:    reqid,
 		requestTime:  time.Now(),

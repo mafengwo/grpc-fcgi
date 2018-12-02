@@ -12,8 +12,17 @@ $request->mergeFromString($body);
 // echo "departure_id:", $request->getDepartureCityID();
 // echo "arrive_id:", $request->getArriveCityID();
 
+$arriveId = $request->getArriveCityID();
+$depId = $request->getDepartureCityID();
+header("arrive_id: $arriveId");
+header("dep_id: $depId");
+header("body_len: ".strlen($body));
+header("pid: ".getmypid());
+header("request_content_length: ". $_SERVER['CONTENT_LENGTH']);
+header("request_user_agent: ". $_SERVER['HTTP_USER_AGENT']);
+
 $response = new \Flight\Price\CityCheapestPriceReply();
-$response->setDepartureCityID($request->getDepartureCityID());
-$response->setArriveCityID($request->getArriveCityID());
+$response->setDepartureCityID($depId);
+$response->setArriveCityID($arriveId);
 $response->setPrice("10.1");
 echo $response->serializeToString();

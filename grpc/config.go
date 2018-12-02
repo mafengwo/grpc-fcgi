@@ -15,7 +15,8 @@ type LogOptions struct {
 
 type FcgiOptions struct {
 	Address              string `required:"true" yaml:"address"`
-	ConnectionLimit      int    `required:"true" yaml:"connection_limit"`
+	MaxConns             int    `required:"true" yaml:"max_connections"`
+	MaxIdleConns         int    `required:"true" yaml:"max_idle_connections"`
 	ConnectionMaxRequest int    `required:"true" yaml:"connection_max_request"`
 	ScriptFileName       string `required:"true" yaml:"script_file_name"`
 	DocumentRoot         string `required:"true" yaml:"document_root"`

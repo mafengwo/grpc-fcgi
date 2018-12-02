@@ -16,10 +16,10 @@ var (
 		Timeout:        60,
 		ReserveHeaders: []string{"Content-Type"},
 		Fcgi: FcgiOptions{
-			Address:         "127.0.0.1:9000",
-			ConnectionLimit: 10,
-			ScriptFileName:  dc + "/index.php",
-			DocumentRoot:    dc,
+			Address:        "127.0.0.1:9000",
+			MaxConns:       10,
+			ScriptFileName: dc + "/index.php",
+			DocumentRoot:   dc,
 		},
 	}
 

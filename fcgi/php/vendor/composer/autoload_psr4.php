@@ -6,8 +6,6 @@ $vendorDir = dirname(dirname(__FILE__));
 $baseDir = dirname($vendorDir);
 
 return array(
-    'Google\\Protobuf\\' => array($vendorDir . '/google/protobuf/php/src/Google/Protobuf'),
-    'GPBMetadata\\Google\\Protobuf\\' => array($vendorDir . '/google/protobuf/php/src/GPBMetadata/Google/Protobuf'),
     'GPBMetadata\\' => array($baseDir . '/GPBMetadata'),
     'Flight\\' => array($baseDir . '/Flight'),
 );

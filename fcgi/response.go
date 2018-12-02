@@ -15,6 +15,7 @@ import (
 
 type Response struct {
 	Headers      map[string][]string
+	Request      *Request
 	Body         []byte
 	ErrorMessage []byte
 }
