@@ -18,7 +18,6 @@ func TestTransport_RoundTrip(t *testing.T) {
 	}
 }
 
-
 var (
 	tran = newTransport()
 )
@@ -39,7 +38,7 @@ func BenchmarkTransport_RoundTrip(b *testing.B) {
 func newTransport() *Transport {
 	return &Transport{
 		MaxConns: 1,
-		Address: "127.0.0.1:9000",
+		Address:  "127.0.0.1:9000",
 	}
 }
 
@@ -64,7 +63,6 @@ func newRequest() *Request {
 		},
 		Body: []byte{0x01},
 	}
-	ctx, _ := context.WithTimeout(context.Background(), time.Second * 3)
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*3)
 	return r.WithContext(ctx)
 }
-

@@ -3,8 +3,8 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,7 +19,6 @@ type streamHandler struct {
 	fcgiOptions *FcgiOptions
 	fcgiClient  *fcgi.Transport
 
-	queue           chan int
 	timeout         time.Duration
 	reservedHeaders []string
 
@@ -75,9 +74,6 @@ func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) *
 		return status.Newf(codes.Internal, "failed to read request from request: %v", err)
 	}
 
-	release := sh.waitingForProxy()
-	defer release()
-
 	dl, dlset := req.ctx.Deadline()
 	if dlset && dl.Before(time.Now()) {
 		return status.Newf(codes.DeadlineExceeded, "context deadline exceeded after waiting")
@@ -103,17 +99,6 @@ func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) *
 	req.upstreamStatus = statusCode
 
 	return sh.sendResponse(stream, resp)
-}
-
-func (sh *streamHandler) waitingForProxy() func() {
-	if sh.queue != nil {
-		sh.queue <- 1
-	}
-	return func() {
-		if sh.queue != nil {
-			<-sh.queue
-		}
-	}
 }
 
 func (sh *streamHandler) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) *status.Status {
@@ -155,8 +140,8 @@ func (sh *streamHandler) log(req *request) {
 		zap.Time("time", req.requestTime),
 		zap.String("host", req.host),
 		zap.String("request_uri", req.method),
-		zap.Int("request_length", req.requestLength),
-		zap.Duration("request_time", req.roundTripTime),
+		zap.Int("request_body_length", req.requestBodyLength),
+		zap.Duration("round_trip_time", req.roundTripTime),
 		zap.Duration("upstream_time", req.upstreamTime),
 		zap.Int("status", req.status),
 		zap.Int("upstream_status", req.upstreamStatus),

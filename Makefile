@@ -10,7 +10,7 @@ BINARY_UNIX=$(BINARY_NAME)_unix
 
 all: build
 pkg:
-    dep ensure
+	dep ensure
 test:
 	$(GOTEST)
 build:

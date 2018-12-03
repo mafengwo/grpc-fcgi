@@ -4,8 +4,8 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/pkg/errors"
-	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"gitlab.mfwdev.com/service/grpc-fcgi/log"
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
@@ -23,17 +23,13 @@ func NewProxy(opt *Options, logger *log.Logger) *Proxy {
 	sh := &streamHandler{
 		fcgiOptions: &opt.Fcgi,
 		fcgiClient: &fcgi.Transport{
-			MaxConns: opt.Fcgi.MaxConns,
+			MaxConns:     opt.Fcgi.MaxConns,
 			MaxIdleConns: opt.Fcgi.MaxIdleConns,
-			Address: opt.Fcgi.Address,
-			//ConnectionMaxRequest: opt.Fcgi.ConnectionMaxRequest,
+			Address:      opt.Fcgi.Address,
 		},
-		reservedHeaders: opt.ReserveHeaders,
-		logger:          logger,
+		logger: logger,
 	}
-	if opt.QueueSize > 0 {
-		sh.queue = make(chan int, opt.QueueSize)
-	}
+
 	if opt.Timeout > 0 {
 		sh.timeout = time.Second * time.Duration(opt.Timeout)
 	}

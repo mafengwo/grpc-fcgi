@@ -5,5 +5,5 @@ package flight.price;
 import "price.proto";
 
 service Price {
-    rpc GetCityCheapestPrice(CityCheapestPriceRequest) returns (CityCheapestPriceReply);
+    rpc GetCityCheapestPrice (CityCheapestPriceRequest) returns (CityCheapestPriceReply);
 }

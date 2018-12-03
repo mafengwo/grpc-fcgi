@@ -15,13 +15,13 @@ import (
 )
 
 type request struct {
-	requestID     string
-	requestTime   time.Time
-	host          string
-	method        string
-	requestLength int
-	metadata       map[string][]string
-	body          []byte
+	requestID         string
+	requestTime       time.Time
+	host              string
+	method            string
+	requestBodyLength int
+	metadata          map[string][]string
+	body              []byte
 
 	roundTripTime  time.Duration
 	upstreamTime   time.Duration
@@ -29,10 +29,10 @@ type request struct {
 	upstreamStatus int
 	bodyBytesSent  int
 
-	ctx    context.Context
+	ctx context.Context
 
-	accessLogger   *zap.Logger
-	errorLogger *zap.Logger
+	accessLogger *zap.Logger
+	errorLogger  *zap.Logger
 }
 
 func readRequest(stream grpc.ServerStream, r *request) error {
@@ -48,7 +48,7 @@ func readRequest(stream grpc.ServerStream, r *request) error {
 	}
 
 	r.body = f.payload[:]
-	r.requestLength = int(len(r.body))
+	r.requestBodyLength = int(len(r.body))
 
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
@@ -99,7 +99,7 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	}
 
 	ct := &httptrace.ClientTrace{
-		GetConn: func(hostPort string){
+		GetConn: func(hostPort string) {
 			r.accessLogger = r.accessLogger.With(zap.Time("GetConn", time.Now()))
 		},
 		GotConn: func(conn httptrace.GotConnInfo) {
