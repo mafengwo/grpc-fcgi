@@ -112,7 +112,7 @@ log:
 访问日志的字段包括:
 - request_id: 请求ID。这个值可以在grpc请求的metadata中设置（key为request_id）.如果metadata中缺失，则自动生成。
 - request_time: 接收到grpc请求的时间
-- host: grpc请求的host，client发送grpc请求时，会将该值设置在metadata的:authority中
+- host: grpc请求的host。 client发送grpc请求时，会将该值设置在metadata的:authority中
 - request_uri: 请求地址
 - request_body_length: 请求的grpc frame中payload大小，不含header。
 - round_trip_time: 从接收grpc请求到将结果返回给client(准确来说是：写入到网络层)的耗时。单位（秒）
@@ -128,8 +128,8 @@ log:
 - wrote_headers_time: 将请求的headers写入到网络层的时间点
 - wrote_request_time: 将整个请求写入到网络层的时间点
 - got_response_first_byte_time: 读到第一个响应字节的时间点
-- put_idle_connection_time: 请求处理完成之后，将连接放入到空闲池的时间点
-- put_idle_connection_error: 未成功放入空闲次的错误原因（通常是空闲池大小超过设置项）, 如果没有错误，就没有该字段
+- put_idle_connection_time: 请求处理完成之后，将连接放入到空闲连接池的时间点
+- put_idle_connection_error: 未成功放入空闲连接池的错误原因（通常是空闲池大小超过设置项）, 如果没有错误，就没有该字段
 
 请求时间的先顺序是 :
 
