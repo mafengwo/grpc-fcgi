@@ -89,39 +89,48 @@ fastcgi:
 log:
   # 访问日志的保存路径
   # 这里可以填写 stdout 或 stderr 来代表标准输出和标准错误输出
-  # 日志字段包括：
-  # request_id: 请求ID。这个值可以在grpc请求的metadata中设置（key为request_id）.
-  #             如果metadata中缺失，则自动生成。
-  # time: 接收到grpc stream的时间
-  # host: grpc请求的host，client发送grpc请求时，会将该值设置在metadata的:authority中
-  # request_uri: 请求地址
-  # request_length: 请求的grpc frame中payload大小，不含header。
-  # round_trip_time: 从接收grpc请求到将结果返回给client(准确来说是：写入到网络层)的耗时。单位（秒）
-  # upstream_time: fastcgi处理结果的时间(从写入完成到接收到第一个字节)。 单位（秒）
-  # status: grpc状态码
-  # upstream_status: fastcgi返回的状态码。 如果没有返回状态码，则是200.
-  # body_bytes_sent: 响应的grpc frame中payload大小，不含header
-  #
-  # 说明:
-  # 1. 因为本工具采用了uber的zap logsdk。该sdk会为每条日志默认加上三个字段：level, ts, msg。
-  #    这三个字段对于访问日志来所是多余的，后续会去掉这三个字段（ts可能保留）。
   access_log_path: "stdout"
   # 是否开启访问日志的详细模式
-  # 当开启详细模式后，访问字段中会增加几个字段，帮助分析fastcgi连接的各项耗时。字段包括
-  # GetConn: 开始获取fastcgi连接的时间点
-  # GotConn: 获取到连接的时间点
-  # ConnectStart： 开始建立连接（拨号）的时间点。如果是复用连接，则没有该字段。
-  # ConnectDone: 拨号完成的时间点
-  # WroteHeaders: 将请求的headers写入到网络层的时间点
-  # WroteRequest: 将整个请求写入到网络层的时间点
-  # GotFirstResponseByte: 读到第一个响应字节的时间点
-  # PutIdle: 请求处理完成之后，将连接放入到空闲池的时间点
-  # PutIdleError: 未成功放入空闲次的错误原因（通常是空闲池大小超过设置项）
+  # 当开启详细模式后，访问字段中会增加几个字段，帮助分析fastcgi连接的各项耗时。
   access_log_verbose: true
   # 错误日志的保存路径
   error_log_path: "stderr"
   # 错误日志的最低写入级别。错误级别由高到低为： error； warn； info; debug;
   error_log_level: "info"
 ```
+
 ## 日志说明
-## 实现原理
+
+日志分为 访问日志 和 错误日志。
+
+访问日志的字段包括:
+- request_id: 请求ID。这个值可以在grpc请求的metadata中设置（key为request_id）.如果metadata中缺失，则自动生成。
+- request_time: 接收到grpc请求的时间
+- host: grpc请求的host，client发送grpc请求时，会将该值设置在metadata的:authority中
+- request_uri: 请求地址
+- request_body_length: 请求的grpc frame中payload大小，不含header。
+- round_trip_time: 从接收grpc请求到将结果返回给client(准确来说是：写入到网络层)的耗时。单位（秒）
+- status: grpc状态码
+- body_bytes_sent: 响应的grpc frame中payload大小，不含header
+- trace: 该请求被转发到fastcgi的次数和详情，这是一个数组。每一条代表一次向fastcgi的转发（因为有可能会失败重发）。
+
+每条trace信息包括以下字段：
+- get_connection_time: 开始获取fastcgi连接的时间点
+- connect_start_time： 开始建立连接（拨号）的时间点。如果是复用连接，则没有该字段。
+- connect_start_done: 拨号完成的时间点。 如果是复用连接，则没有该字段。
+- got_connection_time: 获取到连接的时间点
+- wrote_headers_time: 将请求的headers写入到网络层的时间点
+- wrote_request_time: 将整个请求写入到网络层的时间点
+- got_response_first_byte_time: 读到第一个响应字节的时间点
+- put_idle_connection_time: 请求处理完成之后，将连接放入到空闲池的时间点
+- put_idle_connection_error: 未成功放入空闲次的错误原因（通常是空闲池大小超过设置项）, 如果没有错误，就没有该字段
+
+请求时间的先顺序是 :
+
+request_time -> get_connection_time -> connect_start_time -> connect_done_time -> got_connection_time ->
+wrote_headers_time -> wrote_request_time -> got_response_first_byte_time -> put_idle_connection_time
+
+说明:
+ 1. 因为本工具采用了第三方logsdk。该sdk会为每条日志默认加上三个字段：level, ts, msg。
+    这三个字段对于访问日志来所是多余的，后续会去掉这三个字段（ts可能保留）。
+
