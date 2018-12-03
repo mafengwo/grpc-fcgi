@@ -8,14 +8,14 @@
 我们需要使用PHP作为微服务的server端，并且通讯协议期望是gRPC。
 遗憾的是gRPC官方并没有支持PHP Server。当我们了解gRPC的通讯协议是基于HTTP2之后，
 我们曾试图通过Nginx来作为WebServer(因为Nginx支持HTTP2)。
-但问题是：Nginx并不完全满足gRPC的通讯协议，这会导致比较大的局限性。(技术细节在此暂不细述)
+但问题是：Nginx并不完全满足gRPC的通讯协议，这会导致比较大的局限性(技术细节在此暂不细述)。
 考虑到微服务的重要性，这些局限性从长期来看是不被接受的。
 
 所以我们提出自行研发一个WebServer，这就是这个项目的来源。
 
 ## 功能介绍
 
-从逻辑上来说，gRPC请求分为两部分 metadata 和 body。下面分别介绍。
+从逻辑上来说，gRPC请求分为两部分: metadata 和 body。下面分别介绍。
 
 #### metadata 与 fastcgi 参数
 本工具会将metadata部分以fastcgi参数的形式传入到PHP, 但会进行简单地转换：
@@ -43,17 +43,21 @@ protobuf提供了PHP的编解码函数，在此不具体说明了。
 需要注意的是：
 1. protobuf同时提供了PHP的扩展和SDK。请使用PHP扩展，因为PHP的SDK的编解码速度很慢。
 2. 在PHP中，无法再通过$_GET, $_POST, $_REQUEST, $_COOKIE, $_FILE, $_SESSION, $_ENV这些变量中获取数据。只有$_SERVER变量会被启用。
-3. body存放在php://input中。
+3. body存放在php://input 中。
 
 ## 使用说明
 
 ### 运行程序
-在项目根目录下运行下面命令生成可执行文件。
+编译：
+
 make build-darwin (for mac) 或
+
 make build-linux (for linux)
 
-在工程目录下执行
+运行:
+
 bin/grpc_fastcgi_proxy_darwin -f conf/proxy.yml (for mac) 或
+
 bin/grpc_fastcgi_proxy_linux -f conf/proxy.yml (for linux)
 
 ### 配置项说明
@@ -70,7 +74,7 @@ address: "0.0.0.0:8080"
 # 如果超时，会返回 Deadline exceeded 错误（grpc的错误码为4）
 timeout: 10
 
-# pprof 工具的服务地址
+# pprof 工具的访问地址
 # 我们可以通过访问路径/debug/pprof, 获知该代理程序的运行状态（内存占用，goroutine数量等）
 pprof_address: "0.0.0.0:9876"
 
@@ -85,8 +89,6 @@ fastcgi:
   script_file_name: "/opt/fcgi/php/index.php"
   # fastcgi param DOCUMENT_ROOT
   document_root: "/opt/fcgi/php/"
-# 说明：
-# 1. 所有日志格式均为json
 log:
   # 访问日志的保存路径
   # 这里可以填写 stdout 或 stderr 来代表标准输出和标准错误输出
@@ -101,6 +103,9 @@ log:
 ```
 
 ## 日志说明
+
+说明：
+1. 所有日志格式均为json
 
 日志分为 访问日志 和 错误日志。
 
