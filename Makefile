@@ -5,21 +5,22 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 
-BINARY_NAME=bin/grpc-proxy
-BINARY_UNIX=$(BINARY_NAME)_unix
+BINARY_MAC=bin/grpc_fastcgi_proxy_darwin
+BINARY_LINUX=bin/grpc_fastcgi_proxy_linux
 
-all: build
 pkg:
 	dep ensure
+
 test:
 	$(GOTEST)
-build:
-	$(GOBUILD) -o $(BINARY_NAME) -v
+
+build-darwin:
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BINARY_MAC) -v
+
 clean:
 	$(GOCLEAN)
-	rm -f $(BINARY_NAME)
-	rm -f $(BINARY_UNIX)
+	rm -f $(BINARY_MAC)
+	rm -f $(BINARY_LINUX)
 
-# Cross compilation
 build-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_LINUX) -v

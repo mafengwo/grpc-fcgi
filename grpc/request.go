@@ -103,8 +103,6 @@ type request struct {
 
 func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
-		"REQUEST_METHOD":  {"POST"},
-		"HTTP_HOST":       {r.host}, // reserve host grpc request
 		"CONTENT_TYPE":    {"application/grpc"},
 		"REQUEST_URI":     {r.method},
 		"DOCUMENT_ROOT":   {opts.DocumentRoot},
