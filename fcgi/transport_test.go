@@ -10,7 +10,7 @@ import (
 
 func TestTransport_RoundTrip(t *testing.T) {
 	tran := newTransport()
-	resp, err := tran.RoundTrip(newRequest())
+	resp, _, err := tran.RoundTrip(newRequest())
 	if err != nil {
 		t.Errorf(err.Error())
 	} else {
@@ -25,7 +25,7 @@ var (
 func BenchmarkTransport_RoundTrip(b *testing.B) {
 	fmt.Println("start roundtrip")
 	for i := 0; i < b.N; i++ {
-		_, err := tran.RoundTrip(newRequest())
+		_, _, err := tran.RoundTrip(newRequest())
 		if err != nil {
 			b.Fatalf(err.Error())
 			b.FailNow()
@@ -64,5 +64,6 @@ func newRequest() *Request {
 		Body: []byte{0x01},
 	}
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*3)
-	return r.WithContext(ctx)
+	r.Ctx = ctx
+	return r
 }

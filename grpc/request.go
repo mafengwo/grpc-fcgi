@@ -7,32 +7,142 @@ import (
 	"github.com/google/uuid"
 	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"net/http/httptrace"
 	"strings"
 	"time"
 )
 
+type fcgiRequestRound struct {
+	req  *fcgi.Request
+	resp *fcgi.Response
+	err  error
+}
+
+func (r *fcgiRequestRound) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	if !r.req.Trace.ConnectStartTime.IsZero() {
+		enc.AddTime("connect_start_time", r.req.Trace.ConnectStartTime)
+	}
+	if !r.req.Trace.ConnectDoneTime.IsZero() {
+		enc.AddTime("connect_done_time", r.req.Trace.ConnectDoneTime)
+	}
+	if !r.req.Trace.GetConnTime.IsZero() {
+		enc.AddTime("get_connection_time", r.req.Trace.GetConnTime)
+	}
+	if !r.req.Trace.GotConnTime.IsZero() {
+		enc.AddTime("got_connection_time", r.req.Trace.GotConnTime)
+	}
+	if !r.req.Trace.WroteHeadersTime.IsZero() {
+		enc.AddTime("wrote_headers_time", r.req.Trace.WroteHeadersTime)
+	}
+	if !r.req.Trace.WroteRequestTime.IsZero() {
+		enc.AddTime("wrote_request_time", r.req.Trace.WroteRequestTime)
+	}
+	if !r.req.Trace.GotFirstResponseByteTime.IsZero() {
+		enc.AddTime("got_first_response_byte_time", r.req.Trace.GotFirstResponseByteTime)
+	}
+	if !r.req.Trace.PutIdleTime.IsZero() {
+		enc.AddTime("put_idle_connection_time", r.req.Trace.PutIdleTime)
+	}
+	if r.req.Trace.PutIdleError != nil {
+		enc.AddString("put_idle_connection_error", r.req.Trace.PutIdleError.Error())
+	}
+
+	if r.resp != nil {
+		status, err := r.resp.GetStatusCode()
+		if err != nil {
+			enc.AddString("response_status_code_error", err.Error())
+		}
+
+		enc.AddInt("response_status_code", status)
+	}
+
+	if r.err != nil {
+		enc.AddString("error", r.err.Error())
+	}
+
+	return nil
+}
+
+type fcgiRequestRounds struct {
+	rounds []*fcgiRequestRound
+}
+
+func(rs *fcgiRequestRounds) MarshalLogArray(enc zapcore.ArrayEncoder) error {
+	for _, r := range rs.rounds {
+		err := enc.AppendObject(r)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type request struct {
 	requestID         string
-	requestTime       time.Time
 	host              string
 	method            string
 	requestBodyLength int
 	metadata          map[string][]string
 	body              []byte
+	bodyBytesSent     int
 
-	roundTripTime  time.Duration
-	upstreamTime   time.Duration
-	status         int
-	upstreamStatus int
-	bodyBytesSent  int
+	requestTime  time.Time
+	sentResponse time.Time
+
+	status int
+
+	fcgiRounds *fcgiRequestRounds
 
 	ctx context.Context
 
 	accessLogger *zap.Logger
 	errorLogger  *zap.Logger
+}
+
+func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
+	h := map[string][]string{
+		"REQUEST_METHOD":  {"POST"},
+		"HTTP_HOST":       {r.host}, // reserve host grpc request
+		"CONTENT_TYPE":    {"application/grpc"},
+		"REQUEST_URI":     {r.method},
+		"DOCUMENT_ROOT":   {opts.DocumentRoot},
+		"SCRIPT_FILENAME": {opts.ScriptFileName},
+	}
+	for k, v := range r.metadata {
+		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
+	}
+
+	req := &fcgi.Request{
+		Header: h,
+		Body:   r.body,
+		Ctx:    r.ctx,
+	}
+	return req.WithRequestId(r.requestID).WithTrace()
+}
+
+func (r *request) rotateRound(fcgiReq *fcgi.Request, fcgiResp *fcgi.Response, err error) {
+	r.fcgiRounds.rounds = append(r.fcgiRounds.rounds, &fcgiRequestRound{
+		req:  fcgiReq,
+		resp: fcgiResp,
+		err:  err,
+	})
+}
+
+func (r *request) logAccess() {
+	fields := []zap.Field{
+		zap.String("request_id", r.requestID),
+		zap.Time("request_time", r.requestTime),
+		zap.String("host", r.host),
+		zap.String("request_uri", r.method),
+		zap.Int("request_body_length", r.requestBodyLength),
+		zap.Duration("round_trip_time", r.sentResponse.Sub(r.requestTime)),
+		zap.Int("status", r.status),
+		zap.Int("body_bytes_sent", r.bodyBytesSent),
+		zap.Array("trace", r.fcgiRounds),
+	}
+	r.accessLogger.Info("", fields...)
 }
 
 func readRequest(stream grpc.ServerStream, r *request) error {
@@ -74,60 +184,4 @@ func getRequestId(stream grpc.ServerStream) string {
 	}
 
 	return uuid.New().String()
-}
-
-func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
-	h := map[string][]string{
-		"REQUEST_METHOD":    {"POST"},
-		"SERVER_PROTOCOL":   {"HTTP/2.0"},
-		"HTTP_HOST":         {r.host}, // reserve host grpc request
-		"CONTENT_TYPE":      {"text/html"},
-		"REQUEST_URI":       {r.method},
-		"SCRIPT_NAME":       {r.method},
-		"GATEWAY_INTERFACE": {"CGI/1.1"},
-		"QUERY_STRING":      {""},
-		"DOCUMENT_ROOT":     {opts.DocumentRoot},
-		"SCRIPT_FILENAME":   {opts.ScriptFileName},
-	}
-	for k, v := range r.metadata {
-		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
-	}
-
-	req := &fcgi.Request{
-		Header: h,
-		Body:   r.body,
-	}
-
-	ct := &httptrace.ClientTrace{
-		GetConn: func(hostPort string) {
-			r.accessLogger = r.accessLogger.With(zap.Time("GetConn", time.Now()))
-		},
-		GotConn: func(conn httptrace.GotConnInfo) {
-			r.accessLogger = r.accessLogger.With(zap.Time("GotConn", time.Now()))
-		},
-		PutIdleConn: func(err error) {
-			r.accessLogger = r.accessLogger.With(zap.Time("PutIdle", time.Now()))
-			if err != nil {
-				r.accessLogger = r.accessLogger.With(zap.String("PutIdleError", err.Error()))
-			}
-		},
-		GotFirstResponseByte: func() {
-			r.accessLogger = r.accessLogger.With(zap.Time("GotFirstResponseByte", time.Now()))
-		},
-		ConnectStart: func(network, addr string) {
-			r.accessLogger = r.accessLogger.With(zap.Time("ConnectStart", time.Now()))
-		},
-		ConnectDone: func(network, addr string, err error) {
-			r.accessLogger = r.accessLogger.With(zap.Time("ConnectDone", time.Now()))
-		},
-		WroteHeaders: func() {
-			r.accessLogger = r.accessLogger.With(zap.Time("WroteHeaders", time.Now()))
-		},
-		WroteRequest: func(reqInfo httptrace.WroteRequestInfo) {
-			r.accessLogger = r.accessLogger.With(zap.Time("WroteRequest", time.Now()))
-		},
-	}
-	ctx := httptrace.WithClientTrace(r.ctx, ct)
-
-	return req.WithContext(ctx).WithRequestId(r.requestID)
 }

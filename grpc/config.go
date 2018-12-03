@@ -12,9 +12,10 @@ var (
 )
 
 type LogOptions struct {
-	AccessLogPath string `required:"true" yaml:"access_log_path" json:"access_log_path"`
-	ErrorLogPath  string `required:"true" yaml:"error_log_path" json:"error_log_path"`
-	ErrorLogLevel string `required:"true" yaml:"error_log_level" json:"error_log_level"`
+	AccessLogPath    string `required:"true" yaml:"access_log_path" json:"access_log_path"`
+	AccessLogVerbose bool   `yaml:"access_log_verbose" json:"access_log_verbose"`
+	ErrorLogPath     string `required:"true" yaml:"error_log_path" json:"error_log_path"`
+	ErrorLogLevel    string `required:"true" yaml:"error_log_level" json:"error_log_level"`
 }
 
 func (opt *LogOptions) validate() *ConfigItemError {
@@ -27,7 +28,7 @@ func (opt *LogOptions) validate() *ConfigItemError {
 	}
 	if !levelCollect {
 		return &ConfigItemError{"error_log_level",
-		errors.New("error_log_level must be one of [error warn info debug]")}
+			errors.New("error_log_level must be one of [error warn info debug]")}
 	}
 
 	return nil
@@ -99,7 +100,6 @@ func (opt *Options) Validate() *ConfigItemError {
 		return &ConfigItemError{"timeout", errors.New(fmt.Sprintf("timeout must be a positive number"))}
 	}
 
-
 	if ferr := opt.Fcgi.validate(); ferr != nil {
 		ferr.Path = ferr.Path.withParent("fastcgi")
 		return ferr
@@ -125,7 +125,7 @@ type ConfigItemError struct {
 	Err  error
 }
 
-func(ie *ConfigItemError) Error() string {
+func (ie *ConfigItemError) Error() string {
 	return fmt.Sprintf("config item `%s` error: %v", ie.Path, ie.Err)
 }
 

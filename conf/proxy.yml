@@ -34,7 +34,7 @@ log:
   # request_uri: 请求地址
   # request_length: 请求的grpc frame中payload大小，不含header。
   # round_trip_time: 从接收grpc请求到将结果返回给client(准确来说是：写入到网络层)的耗时。单位（秒）
-  # upstream_time: fastcgi处理结果的时间。 单位（秒）
+  # upstream_time: fastcgi处理结果的时间(从写入完成到接收到第一个字节)。 单位（秒）
   # status: grpc状态码
   # upstream_status: fastcgi返回的状态码。 如果没有返回状态码，则是200.
   # body_bytes_sent: 响应的grpc frame中payload大小，不含header
