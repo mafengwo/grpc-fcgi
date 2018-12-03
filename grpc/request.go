@@ -103,10 +103,11 @@ type request struct {
 
 func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
-		"CONTENT_TYPE":    {"application/grpc"},
-		"REQUEST_URI":     {r.method},
-		"DOCUMENT_ROOT":   {opts.DocumentRoot},
-		"SCRIPT_FILENAME": {opts.ScriptFileName},
+		"REQUEST_METHOD":    {"POST"},
+		"CONTENT_TYPE":      {"application/grpc"},
+		"REQUEST_URI":       {r.method},
+		"DOCUMENT_ROOT":     {opts.DocumentRoot},
+		"SCRIPT_FILENAME":   {opts.ScriptFileName},
 	}
 	for k, v := range r.metadata {
 		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}

@@ -27,7 +27,8 @@
 1. CONTENT_TYPE 取值统一为 "application/grpc"
 2. REQUEST_URI  请求的URI
 3. DOCUMENT_ROOT 程序目录
-4  SCRIPT_FILENAME 执行脚本地址
+4. SCRIPT_FILENAME 执行脚本地址
+5. REQUEST_METHOD 统一为"POST", 该值是php-fpm协议要求而加上的。对于开发者来说，该值没有实际意义，因为gRPC不区分请求方法。
 
 在PHP中，以上fastcgi参数存放在 $_SERVER 中。
 
