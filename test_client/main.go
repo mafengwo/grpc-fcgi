@@ -48,7 +48,7 @@ func main() {
 
 			rid := strconv.Itoa(i) + "#" + strconv.Itoa(time.Now().Nanosecond()) + strconv.Itoa(rand.Int())
 			header := metadata.New(map[string]string{
-				"client": "go-proxy-test",
+				"client":     "go-proxy-test",
 				"request_id": rid,
 			})
 			ctx = metadata.NewOutgoingContext(ctx, header)

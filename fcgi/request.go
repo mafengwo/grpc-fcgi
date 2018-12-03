@@ -6,18 +6,30 @@ import (
 	"io"
 	"net/http/httptrace"
 	"strconv"
+	"sync"
+	"time"
 )
 
-type SizedReader interface {
-	io.Reader
-	Size() int64
+type TraceInfo struct {
+	ConnectStartTime         time.Time
+	ConnectDoneTime          time.Time
+	GetConnTime              time.Time
+	GotConnTime              time.Time
+	WroteHeadersTime         time.Time
+	WroteRequestTime         time.Time
+	GotFirstResponseByteTime time.Time
+	PutIdleTime              time.Time
+	PutIdleError             error
 }
 
 type Request struct {
 	Header map[string][]string
 	Body   []byte
 
-	ctx context.Context
+	Trace *TraceInfo
+
+	Ctx   context.Context
+	ctxMu sync.Mutex
 }
 
 func (r *Request) write(w io.Writer) (err error) {
@@ -43,7 +55,7 @@ func (r *Request) write(w io.Writer) (err error) {
 	if err := writeParams(w, &buf, requestID, r.Header); err != nil {
 		return err
 	}
-	if trace != nil && trace.WroteHeaderField != nil {
+	if trace != nil && trace.WroteHeaders != nil {
 		trace.WroteHeaders()
 	}
 
@@ -52,30 +64,46 @@ func (r *Request) write(w io.Writer) (err error) {
 	return writeStdin(w, &bodyBuf, requestID, bytes.NewReader(r.Body))
 }
 
-func (r *Request) Context() context.Context {
-	return r.ctx
+func (r *Request) WithTrace() *Request {
+	r.initOnce()
+
+	trace := &httptrace.ClientTrace{
+		GetConn: func(hostPort string) { r.Trace.GetConnTime = time.Now() },
+		GotConn: func(conn httptrace.GotConnInfo) { r.Trace.GotConnTime = time.Now() },
+		PutIdleConn: func(err error) {
+			r.Trace.PutIdleTime = time.Now()
+			if err != nil {
+				r.Trace.PutIdleError = err
+			}
+		},
+		GotFirstResponseByte: func() { r.Trace.GotFirstResponseByteTime = time.Now() },
+		ConnectStart:         func(network, addr string) { r.Trace.ConnectStartTime = time.Now() },
+		ConnectDone:          func(network, addr string, err error) { r.Trace.ConnectDoneTime = time.Now() },
+		WroteHeaders:         func() { r.Trace.WroteHeadersTime = time.Now() },
+		WroteRequest:         func(reqInfo httptrace.WroteRequestInfo) { r.Trace.WroteRequestTime = time.Now() },
+	}
+	r.Ctx = httptrace.WithClientTrace(r.Ctx, trace)
+	return r
 }
 
-func (r *Request) WithContext(ctx context.Context) *Request {
-	r.ctx = ctx
-	return r
+func (r *Request) Context() context.Context {
+	return r.Ctx
 }
 
 type requestIdKey struct{}
 
 func (r *Request) WithRequestId(id string) *Request {
-	if r.ctx != nil {
-		r.ctx = context.WithValue(r.ctx, requestIdKey{}, id)
-	}
+	r.initOnce()
+
+	r.Ctx = context.WithValue(r.Ctx, requestIdKey{}, id)
 	return r
 }
 
 func (r *Request) GetRequestId() (string, bool) {
-	if r.ctx != nil {
-		v, ok := r.ctx.Value(requestIdKey{}).(string)
-		return v, ok
-	}
-	return "", false
+	r.initOnce()
+
+	v, ok := r.Ctx.Value(requestIdKey{}).(string)
+	return v, ok
 }
 
 func (r *Request) isReplayable() bool {
@@ -84,4 +112,17 @@ func (r *Request) isReplayable() bool {
 
 func (r *Request) closeBody() {
 
+}
+
+func (r *Request) initOnce() {
+	r.ctxMu.Lock()
+	defer r.ctxMu.Unlock()
+
+	if r.Ctx == nil {
+		r.Ctx = context.Background()
+	}
+
+	if r.Trace == nil {
+		r.Trace = &TraceInfo{}
+	}
 }

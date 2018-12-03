@@ -10,11 +10,9 @@ import (
 
 var (
 	dc, _ = filepath.Abs("../fcgi/php/")
-	opt = &Options{
-		Address:        "0.0.0.0:8080",
-		QueueSize:      100,
-		Timeout:        60,
-		ReserveHeaders: []string{"Content-Type"},
+	opt   = &Options{
+		Address: "0.0.0.0:8080",
+		Timeout: 60,
 		Fcgi: FcgiOptions{
 			Address:        "127.0.0.1:9000",
 			MaxConns:       10,
@@ -27,7 +25,6 @@ var (
 		AccessLogPath: "stdout",
 		ErrorLogPath:  "stderr",
 		ErrorLogLevel: "warn",
-		ErrorLogTrace: false,
 	}
 )
 
@@ -42,6 +39,7 @@ var (
 time.Sleep(50);
 `
 )
+
 func TestProxy_Timeout(t *testing.T) {
 	release := writeTempPhpFile(costlyPhp, opt)
 	defer release()
@@ -92,4 +90,3 @@ func startServe(p *Proxy) {
 		panic("failed to serve: " + err.Error())
 	}
 }
-

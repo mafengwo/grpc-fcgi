@@ -385,7 +385,6 @@ func nop() {}
 var (
 	testHookEnterRoundTrip   = nop
 	testHookWaitResLoop      = nop
-	testHookRoundTripRetried = nop
 	testHookPrePendingDial   = nop
 	testHookPostPendingDial  = nop
 

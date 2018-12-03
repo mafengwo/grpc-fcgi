@@ -10,7 +10,6 @@ type Options struct {
 	AccessLogPath string
 	ErrorLogLevel string // supports: debug; info; warn; error
 	ErrorLogPath  string
-	ErrorLogTrace bool
 }
 
 type Logger struct {
@@ -48,9 +47,9 @@ func NewLogger(opt *Options) (*Logger, error) {
 		return nil, errors.New("Unsupported log level:" + opt.ErrorLogLevel)
 	}
 	el, err := zap.Config{
-		Development:       opt.ErrorLogTrace,
-		DisableCaller:     !opt.ErrorLogTrace,
-		DisableStacktrace: !opt.ErrorLogTrace,
+		Development:       false,
+		DisableCaller:     true,
+		DisableStacktrace: true,
 		EncoderConfig:     zap.NewProductionEncoderConfig(),
 		Encoding:          "json",
 		ErrorOutputPaths:  []string{opt.ErrorLogPath},
@@ -80,4 +79,3 @@ func (l *Logger) NewAccessLogger() *zap.Logger {
 func (l *Logger) ErrorLogger() *zap.Logger {
 	return l.errorLogger
 }
-

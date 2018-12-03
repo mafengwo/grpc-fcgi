@@ -78,44 +78,44 @@ func (tr *transportRequest) setError(err error) {
 	tr.mu.Unlock()
 }
 
-// roundTrip implements a RoundTripper over HTTP.
-func (t *Transport) RoundTrip(req *Request) (*Response, error) {
+// roundTrip implements a RoundTripper
+func (t *Transport) RoundTrip(req *Request) (*Response, bool, error) {
 	ctx := req.Context()
 	trace := httptrace.ContextClientTrace(ctx)
 
-	for {
-		select {
-		case <-ctx.Done():
-			req.closeBody()
-			return nil, ctx.Err()
-		default:
-		}
-
-		// treq gets modified by roundTrip, so we need to recreate for each retry.
-		treq := &transportRequest{Request: req, trace: trace}
-
-		pconn, err := t.getConn(treq)
-		if err != nil {
-			req.closeBody()
-			return nil, err
-		}
-
-		resp, err := pconn.roundTrip(treq)
-		if err == nil {
-			return resp, nil
-		}
-		if !pconn.shouldRetryRequest(req, err) {
-			if e, ok := err.(transportReadFromServerError); ok {
-				err = e.err
-			}
-			return nil, err
-		}
-		testHookRoundTripRetried()
+	select {
+	case <-ctx.Done():
+		req.closeBody()
+		return nil, false, ctx.Err()
+	default:
 	}
+
+	// treq gets modified by roundTrip, so we need to recreate for each retry.
+	treq := &transportRequest{Request: req, trace: trace}
+
+	pconn, err := t.getConn(treq)
+	if err != nil {
+		req.closeBody()
+		return nil, false, err
+	}
+
+	resp, err := pconn.roundTrip(treq)
+	if err == nil {
+		return resp, false, nil
+	}
+
+	if !pconn.shouldRetryRequest(req, err) {
+		if e, ok := err.(transportReadFromServerError); ok {
+			err = e.err
+		}
+		return nil, false, err
+	}
+
+	return nil, true, err
 }
 
 // shouldRetryRequest reports whether we should retry sending a failed
-// HTTP request on a new connection. The non-nil input error is the
+// request on a new connection. The non-nil input error is the
 // error from roundTrip.
 func (pc *persistConn) shouldRetryRequest(req *Request, err error) bool {
 	if !pc.isReused() {
@@ -332,6 +332,9 @@ func (t *Transport) getConn(treq *transportRequest) (*persistConn, error) {
 	req := treq.Request
 	trace := treq.trace
 	ctx := req.Context()
+	if trace != nil && trace.GetConn != nil {
+		trace.GetConn(t.Address)
+	}
 	if pc, idleSince := t.getIdleConn(); pc != nil {
 		if trace != nil && trace.GotConn != nil {
 			trace.GotConn(pc.gotIdleConnTrace(idleSince))

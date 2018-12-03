@@ -29,7 +29,7 @@ log:
 )
 
 func Test_LoadConfig(t *testing.T) {
-	td := os.TempDir()+"/"+"grpc_proxy_config.yml"
+	td := os.TempDir() + "/" + "grpc_proxy_config.yml"
 	defer os.RemoveAll(td)
 
 	err := ioutil.WriteFile(td, []byte(config1), 0777)
@@ -44,4 +44,3 @@ func Test_LoadConfig(t *testing.T) {
 	jsonopt, _ := json.MarshalIndent(opt, "", "")
 	t.Logf("%s", jsonopt)
 }
-

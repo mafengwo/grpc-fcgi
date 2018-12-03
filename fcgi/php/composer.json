@@ -1,11 +1,11 @@
 {
-    "name": "grpc-php-server-example",
-    "require": {
-    },
-    "autoload": {
-        "psr-4": {
-            "Flight\\": "Flight",
-            "GPBMetadata\\": "GPBMetadata"
-        }
+  "name": "grpc-php-server-example",
+  "require": {
+  },
+  "autoload": {
+    "psr-4": {
+      "Flight\\": "Flight",
+      "GPBMetadata\\": "GPBMetadata"
     }
+  }
 }
