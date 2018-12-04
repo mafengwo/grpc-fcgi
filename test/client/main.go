@@ -61,13 +61,13 @@ func main() {
 				err = getFeature(ctx, &respHeader, &respTrailer)
 				break
 			case "list_features":
+				err = listFeatures(ctx, &respHeader, &respTrailer)
 				break
 			case "record_route":
+				err = recordRoute(ctx, &respHeader, &respTrailer)
 				break
 			case "route_chat":
 				break
-			case "test_tmp":
-				err = testTemp(ctx, &respHeader, &respTrailer)
 			default:
 				fmt.Println("method unsupported")
 				return
@@ -88,7 +88,7 @@ func main() {
 		cc <- 1
 	}
 	cost := time.Now().Sub(start)
-	log.Printf("cost: %s; ops: %.0f", cost, float64(*times) / cost.Seconds())
+	log.Printf("cost: %s; qps: %.0f", cost, float64(*times) / cost.Seconds())
 }
 
 func getFeature(ctx context.Context, header *metadata.MD, trailer *metadata.MD) error {
@@ -111,16 +111,63 @@ func getFeature(ctx context.Context, header *metadata.MD, trailer *metadata.MD) 
 	return nil
 }
 
-func testTemp(ctx context.Context, header *metadata.MD, trailer *metadata.MD) error {
+func listFeatures(ctx context.Context, header *metadata.MD, trailer *metadata.MD) error {
+	p := &route_guide.Rectangle{
+		Lo: &route_guide.Point{
+			Latitude: rand.Int31(),
+			Longitude: rand.Int31(),
+		},
+		Hi:&route_guide.Point{
+			Latitude: rand.Int31(),
+			Longitude: rand.Int31(),
+		},
+	}
+
+	fc, err := client.ListFeatures(ctx, p, grpc.Header(header), grpc.Trailer(trailer))
+	if err != nil {
+		return err
+	}
+
+	for {
+		resp, err := fc.Recv()
+
+		if err != nil {
+			return err
+		}
+
+		if resp == nil {
+			return errors.Errorf("resp is nil")
+		}
+	}
+
+	return nil
+}
+
+func recordRoute(ctx context.Context, header *metadata.MD, trailer *metadata.MD) error {
+	rrc, err := client.RecordRoute(ctx)
+	if err != nil {
+		return err
+	}
+
 	p := &route_guide.Point{
 		Latitude: rand.Int31(),
 		Longitude: rand.Int31(),
 	}
 
-	_, err := client.GetFeature(ctx, p, grpc.Header(header), grpc.Trailer(trailer))
-	if err != nil {
-		return err
+	times := 10
+	for i := 0; i < times; i++ {
+		err = rrc.Send(p)
+		if err != nil {
+			return err
+		}
 	}
 
+	resp, err := rrc.CloseAndRecv()
+	if err != nil {
+		return  err
+	}
+	if int(resp.PointCount) != times {
+		return errors.Errorf("sent %d, received: %d", times, resp.PointCount)
+	}
 	return nil
 }
