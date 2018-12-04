@@ -69,7 +69,7 @@ type fcgiRequestRounds struct {
 	rounds []*fcgiRequestRound
 }
 
-func(rs *fcgiRequestRounds) MarshalLogArray(enc zapcore.ArrayEncoder) error {
+func (rs *fcgiRequestRounds) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 	for _, r := range rs.rounds {
 		err := enc.AppendObject(r)
 		if err != nil {
@@ -103,11 +103,11 @@ type request struct {
 
 func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
-		"REQUEST_METHOD":    {"POST"},
-		"CONTENT_TYPE":      {"application/grpc"},
-		"REQUEST_URI":       {r.method},
-		"DOCUMENT_ROOT":     {opts.DocumentRoot},
-		"SCRIPT_FILENAME":   {opts.ScriptFileName},
+		"REQUEST_METHOD":  {"POST"},
+		"CONTENT_TYPE":    {"application/grpc"},
+		"REQUEST_URI":     {r.method},
+		"DOCUMENT_ROOT":   {opts.DocumentRoot},
+		"SCRIPT_FILENAME": {opts.ScriptFileName},
 	}
 	for k, v := range r.metadata {
 		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
@@ -121,12 +121,10 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 	return req.WithRequestId(r.requestID).WithTrace()
 }
 
-func (r *request) rotateRound(fcgiReq *fcgi.Request, fcgiResp *fcgi.Response, err error) {
-	r.fcgiRounds.rounds = append(r.fcgiRounds.rounds, &fcgiRequestRound{
-		req:  fcgiReq,
-		resp: fcgiResp,
-		err:  err,
-	})
+func (r *request) rotateRound(fcgiReq *fcgi.Request) (*fcgiRequestRound) {
+	round := &fcgiRequestRound{req: fcgiReq}
+	r.fcgiRounds.rounds = append(r.fcgiRounds.rounds, round)
+	return round
 }
 
 func (r *request) logAccess() {
