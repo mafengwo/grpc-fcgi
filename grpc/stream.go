@@ -49,7 +49,6 @@ func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream)
 	proxyDone := make(chan *status.Status)
 	go func() {
 		s := sh.handleRequest(stream, req)
-		req.sentResponse = time.Now()
 		proxyDone <- s
 	}()
 
@@ -64,6 +63,7 @@ func (sh *streamHandler) handleStream(srv interface{}, stream grpc.ServerStream)
 		}
 	}
 
+	req.sentResponse = time.Now()
 	req.status = int(result.Code())
 
 	return status.Error(result.Code(), result.Message())
@@ -86,9 +86,10 @@ func (sh *streamHandler) handleRequest(stream grpc.ServerStream, req *request) *
 	retrying := true
 	for retrying {
 		fcgiReq := req.toFcgiRequest(sh.fcgiOptions)
+		round := req.rotateRound(fcgiReq)
 		resp, retrying, err = sh.fcgiClient.RoundTrip(fcgiReq)
-
-		req.rotateRound(fcgiReq, resp, err)
+		round.resp = resp
+		round.err = err
 	}
 	if err != nil {
 		return status.Newf(codes.Internal, "failed to proxy: %v", err)
