@@ -9,7 +9,14 @@ clone:
       innerid: hub.mfwdev.com
 
 pipeline:
-  docker-push:
+  build:
+    image: hub.mfwdev.com/paas/golang:1.11
+    network_mode: host
+    auth_config:
+      innerid: hub.mfwdev.com
+    commands:
+    - GOOS=linux go build -o ./grpc_fastcgi_proxy  gitlab.mfwdev.com/service/grpc-fcgi
+  push:
     image: hub.mfwdev.com/paas/drone-docker:v0.5.4
     auth_config:
       innerid: hub.mfwdev.com
