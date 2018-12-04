@@ -27,9 +27,9 @@ log:
   # 访问日志的保存路径
   # 这里可以填写 stdout 或 stderr 来代表标准输出和标准错误输出
   access_log_path: "stdout"
-  # 是否开启访问日志的详细模式
-  # 当开启详细模式后，访问字段中会增加几个字段，帮助分析fastcgi连接的各项耗时。
-  access_log_verbose: true
+  # 是否开启访问日志的调试模式
+  # 当开启调试模式后，访问字段中会增加trace字段，帮助分析fastcgi连接的各项耗时。
+  access_log_trace: true
   # 错误日志的保存路径
   error_log_path: "stderr"
   # 错误日志的最低写入级别。错误级别由高到低为： error； warn； info; debug;
