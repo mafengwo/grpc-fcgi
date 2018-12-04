@@ -101,7 +101,7 @@ type request struct {
 	errorLogger  *zap.Logger
 }
 
-func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
+func (r *request) toFcgiRequest(opts FcgiOptions) (*fcgi.Request) {
 	h := map[string][]string{
 		"REQUEST_METHOD":  {"POST"},
 		"CONTENT_TYPE":    {"application/grpc"},
@@ -118,7 +118,7 @@ func (r *request) toFcgiRequest(opts *FcgiOptions) (*fcgi.Request) {
 		Body:   r.body,
 		Ctx:    r.ctx,
 	}
-	return req.WithRequestId(r.requestID).WithTrace()
+	return req.WithRequestId(r.requestID)
 }
 
 func (r *request) rotateRound(fcgiReq *fcgi.Request) (*fcgiRequestRound) {

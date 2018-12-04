@@ -9,45 +9,39 @@ import (
 	"google.golang.org/grpc"
 	"net"
 	"net/http"
-	"time"
 )
 
 type Proxy struct {
-	opt            *Options
-	streamHandler  *streamHandler
+	opt *Options
+
+	fcgiClient *fcgi.Transport
+
 	internalServer *grpc.Server
-	logger         *log.Logger
+
+	logger *log.Logger
 }
 
 func NewProxy(opt *Options, logger *log.Logger) *Proxy {
-	sh := &streamHandler{
-		fcgiOptions: &opt.Fcgi,
+	p := &Proxy{
+		opt:    opt,
+		logger: logger,
 		fcgiClient: &fcgi.Transport{
 			MaxConns:     opt.Fcgi.MaxConns,
 			MaxIdleConns: opt.Fcgi.MaxIdleConns,
 			Address:      opt.Fcgi.Address,
 		},
-		logger: logger,
 	}
 
-	if opt.Timeout > 0 {
-		sh.timeout = time.Second * time.Duration(opt.Timeout)
-	}
-
-	p := &Proxy{
-		opt:           opt,
-		streamHandler: sh,
-		logger:        logger,
-	}
 	p.internalServer = grpc.NewServer(
 		grpc.CustomCodec(Codec()),
-		grpc.UnknownServiceHandler(sh.handleStream),
+		grpc.UnknownServiceHandler(p.handleStream),
 		grpc.StreamInterceptor(
 			grpc_middleware.ChainStreamServer(
 				grpc_recovery.StreamServerInterceptor(),
 			),
 		),
 	)
+
 	return p
 }
 

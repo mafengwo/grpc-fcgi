@@ -12,10 +12,10 @@ var (
 )
 
 type LogOptions struct {
-	AccessLogPath    string `required:"true" yaml:"access_log_path" json:"access_log_path"`
-	AccessLogVerbose bool   `yaml:"access_log_verbose" json:"access_log_verbose"`
-	ErrorLogPath     string `required:"true" yaml:"error_log_path" json:"error_log_path"`
-	ErrorLogLevel    string `required:"true" yaml:"error_log_level" json:"error_log_level"`
+	AccessLogPath  string `required:"true" yaml:"access_log_path" json:"access_log_path"`
+	AccessLogTrace bool   `yaml:"access_log_trace" json:"access_log_trace"`
+	ErrorLogPath   string `required:"true" yaml:"error_log_path" json:"error_log_path"`
+	ErrorLogLevel  string `required:"true" yaml:"error_log_level" json:"error_log_level"`
 }
 
 func (opt *LogOptions) validate() *ConfigItemError {
