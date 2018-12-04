@@ -1,0 +1,21 @@
+workspace:
+  base: /go/
+
+clone:
+  git:
+    image: hub.mfwdev.com/paas/drone-plugin-git:latest
+    network_mode: host
+    auth_config:
+      innerid: hub.mfwdev.com
+
+pipeline:
+  docker-push:
+    image: hub.mfwdev.com/paas/drone-docker:v0.5.4
+    auth_config:
+      innerid: hub.mfwdev.com
+    auth_config_innerid: hub.mfwdev.com
+    repo: hub.mfwdev.com/service/grpc-fcgi
+    dockerfile: Dockerfile
+    network_mode: host
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock

@@ -1,6 +1,7 @@
-FROM docker.mfwdev.com/paas/php-fpm:5.6.36-fpm.v0.1.9
+FROM centos:7
 
-ADD ./bin/grpc-proxy_unix /usr/local/bin/grpc-proxy
-ADD ./conf/proxy.yml /etc/grpc-proxy.yml
+ADD ./bin/grpc_fastcgi_proxy_linux /usr/local/bin/grpc_fastcgi_proxy
 
-ENTRYPOINT ["docker-php-entrypoint", "-R"]
+ADD ./conf/proxy.yml /etc/grpc_fastcgi_proxy/proxy.yml
+
+ENTRYPOINT ["/usr/local/bin/grpc_fastcgi_proxy", "-f", "/etc/grpc_fastcgi_proxy/proxy.yml"]
