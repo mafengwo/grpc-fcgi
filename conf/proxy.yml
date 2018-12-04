@@ -17,9 +17,9 @@ fastcgi:
   # 最大空闲链接数
   max_idle_connections: 100
   # fastcgi param SCRIPT_FILENAME
-  script_file_name: "/opt/fcgi/php/index.php"
+  script_file_name: "/opt/test/php/index.php"
   # fastcgi param DOCUMENT_ROOT
-  document_root: "/opt/fcgi/php/"
+  document_root: "/opt/test/php/"
 
 # 说明：
 # 1. 所有日志格式均为json
