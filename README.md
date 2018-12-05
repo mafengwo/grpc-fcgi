@@ -3,6 +3,7 @@
 本项目是提供一个代理工具，将gRPC请求转换成fastcgi请求，
 然后再将fastcgi的结果以gRPC通讯协议发送给gRPC客户端。
 
+
 ## 项目背景
 
 我们需要使用PHP作为微服务的server端，并且通讯协议期望是gRPC。
@@ -44,6 +45,8 @@ protobuf提供了PHP的编解码函数，在此不具体说明了。
 1. protobuf同时提供了PHP的扩展和SDK。请使用PHP扩展，因为PHP的SDK的编解码速度很慢。
 2. 在PHP中，无法再通过$_GET, $_POST, $_REQUEST, $_COOKIE, $_FILE, $_SESSION, $_ENV这些变量中获取数据。只有$_SERVER变量会被启用。
 3. body存放在php://input 中。
+
+** 因为fastcgi协议原因，不支持gRPC streaming模式 **
 
 ## 使用说明
 

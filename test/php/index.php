@@ -13,6 +13,9 @@ switch($method) {
         break;
     case "ListFeatures":
         break;
+    case "RecordRoute":
+        $resp = get_feature($body);
+        break;
     default:
         throw new \Exception("unknown method");
 }
@@ -20,6 +23,20 @@ switch($method) {
 echo $resp->serializeToString();
 
 function get_feature($body) {
+    $point = new \Routeguide\Point();
+    $point->mergeFromString($body);
+
+    $resp = new \Routeguide\Feature();
+
+    $respPoint = new \Routeguide\Point();
+    $respPoint->setLatitude($point->getLatitude())
+        ->setLongitude($point->getLongitude());
+
+    return $resp->setName("feature_name")
+        ->setLocation($respPoint);
+}
+
+function record_route($body) {
     $point = new \Routeguide\Point();
     $point->mergeFromString($body);
 
