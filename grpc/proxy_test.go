@@ -1,7 +1,7 @@
 package grpc
 
 import (
-	"gitlab.mfwdev.com/service/grpc-fcgi/log"
+	"github.com/mafengwo/grpc-fcgi/log"
 	"io/ioutil"
 	"os"
 	"path/filepath"

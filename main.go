@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"gitlab.mfwdev.com/service/grpc-fcgi/grpc"
-	"gitlab.mfwdev.com/service/grpc-fcgi/log"
+	"github.com/mafengwo/grpc-fcgi/grpc"
+	"github.com/mafengwo/grpc-fcgi/log"
 	"go.uber.org/zap"
 	"net/http"
 	_ "net/http/pprof"
@@ -59,6 +59,13 @@ func main() {
 
 	// pprof
 	go func() {
+		// for healthy check
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" {
+				w.Write([]byte("ok"))
+			}
+		})
+
 		err := http.ListenAndServe(options.PprofAddress, nil)
 		logger.ErrorLogger().Info("serve pprof: " + err.Error())
 	}()

@@ -3,9 +3,10 @@
 本项目是提供一个代理工具，将gRPC请求转换成fastcgi请求，
 然后再将fastcgi的结果以gRPC通讯协议发送给gRPC客户端。
 
+
 ## 项目背景
 
-我们需要使用PHP作为微服务的server端，并且通讯协议期望是gRPC。
+我们需要使用PHP作为gRPC的server端，并且通讯协议期望是gRPC。
 遗憾的是gRPC官方并没有支持PHP Server。当我们了解gRPC的通讯协议是基于HTTP2之后，
 我们曾试图通过Nginx来作为WebServer(因为Nginx支持HTTP2)。
 但问题是：Nginx并不完全满足gRPC的通讯协议，这会导致比较大的局限性(技术细节在此暂不细述)。
@@ -45,6 +46,8 @@ protobuf提供了PHP的编解码函数，在此不具体说明了。
 2. 在PHP中，无法再通过$_GET, $_POST, $_REQUEST, $_COOKIE, $_FILE, $_SESSION, $_ENV这些变量中获取数据。只有$_SERVER变量会被启用。
 3. body存放在php://input 中。
 
+** 因为fastcgi协议原因，不支持gRPC streaming模式 **
+
 ## 使用说明
 
 ### 运行程序
@@ -68,7 +71,7 @@ bin/grpc_fastcgi_proxy_linux -f conf/proxy.yml (for linux)
 
 ```
 # 该工具的监听地址
-address: "0.0.0.0:8080"
+address: "0.0.0.0:50051"
 
 # 每次请求的处理超时时间。单位：秒
 # 如果超时，会返回 Deadline exceeded 错误（grpc的错误码为4）
@@ -118,7 +121,7 @@ log:
 - round_trip_time: 从接收grpc请求到将结果返回给client(准确来说是：写入到网络层)的耗时。单位（秒）
 - status: grpc状态码
 - body_bytes_sent: 响应的grpc frame中payload大小，不含header
-- trace: 该请求被转发到fastcgi的次数和详情，这是一个数组。每一条代表一次向fastcgi的转发（因为有可能会失败重发）。
+- trace: 当配置项中log.access_log_trace为true时，包含该字段。该字段表示请求被转发到fastcgi的次数和详情。这是一个数组，每一条代表一次向fastcgi的转发（因为有可能会失败重发）。
 
 每条trace信息包括以下字段：
 - get_connection_time: 开始获取fastcgi连接的时间点

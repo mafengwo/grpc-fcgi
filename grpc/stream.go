@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"github.com/mafengwo/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

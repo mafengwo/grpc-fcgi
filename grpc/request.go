@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"gitlab.mfwdev.com/service/grpc-fcgi/fcgi"
+	"github.com/mafengwo/grpc-fcgi/fcgi"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"

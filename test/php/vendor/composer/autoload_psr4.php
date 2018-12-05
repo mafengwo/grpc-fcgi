@@ -6,6 +6,6 @@ $vendorDir = dirname(dirname(__FILE__));
 $baseDir = dirname($vendorDir);
 
 return array(
+    'Routeguide\\' => array($baseDir . '/Routeguide'),
     'GPBMetadata\\' => array($baseDir . '/GPBMetadata'),
-    'Flight\\' => array($baseDir . '/Flight'),
 );
