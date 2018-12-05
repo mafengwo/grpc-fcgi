@@ -1,5 +1,5 @@
 # 该工具的监听地址
-address: "0.0.0.0:8080"
+address: "0.0.0.0:50051"
 
 # 每次请求的处理超时时间。单位：秒
 # 如果超时，会返回 Deadline exceeded 错误（grpc的错误码为4）
@@ -7,7 +7,7 @@ timeout: 10
 
 # pprof 工具的服务地址
 # 我们可以通过访问路径/debug/pprof, 获知该代理程序的运行状态（内存占用，goroutine数量等）
-pprof_address: "0.0.0.0:9876"
+pprof_address: "0.0.0.0:80"
 
 fastcgi:
   # 转发的fastcgi地址
@@ -17,9 +17,9 @@ fastcgi:
   # 最大空闲链接数
   max_idle_connections: 100
   # fastcgi param SCRIPT_FILENAME
-  script_file_name: "/opt/test/php/index.php"
+  script_file_name: "/opt/routeguide/index.php"
   # fastcgi param DOCUMENT_ROOT
-  document_root: "/opt/test/php/"
+  document_root: "/opt/routeguide/"
 
 # 说明：
 # 1. 所有日志格式均为json
