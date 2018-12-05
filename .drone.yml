@@ -15,6 +15,9 @@ pipeline:
     auth_config:
       innerid: hub.mfwdev.com
     commands:
+    - mkdir -p /go/src/github.com/mafengwo
+    - ln -s /go/src/gitlab.mfwdev.com/service/grpc-fcgi /go/src/github.com/mafengwo/grpc-fcgi
+    - cd /go/src/github.com/mafengwo/grpc-fcgi
     - GOOS=linux go build -o ./grpc_fastcgi_proxy
   push:
     image: hub.mfwdev.com/paas/drone-docker:v0.5.4
