@@ -108,9 +108,10 @@ func (r *request) toFcgiRequest(opts FcgiOptions) (*fcgi.Request) {
 		"REQUEST_URI":     {r.method},
 		"DOCUMENT_ROOT":   {opts.DocumentRoot},
 		"SCRIPT_FILENAME": {opts.ScriptFileName},
+		"SERVER_SOFTWARE": {"grpc-fcgi"},
 	}
 	for k, v := range r.metadata {
-		h["HTTP_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
+		h["TRAILER_"+strings.Replace(strings.ToUpper(k), "-", "_", -1)] = []string{v[0]}
 	}
 
 	req := &fcgi.Request{
