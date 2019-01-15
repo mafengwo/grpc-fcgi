@@ -17,9 +17,10 @@ fastcgi:
   # 最大空闲链接数
   max_idle_connections: 100
   # fastcgi param SCRIPT_FILENAME
-  script_file_name: "/opt/routeguide/index.php"
+  # script_file_name: "/opt/routeguide/index.php"
+  script_file_name: "/Users/jjw/gocode/src/github.com/mafengwo/grpc-fcgi/test/php/index.php"
   # fastcgi param DOCUMENT_ROOT
-  document_root: "/opt/routeguide/"
+  document_root: "/Users/jjw/gocode/src/github.com/mafengwo/grpc-fcgi/test/php/"
 
 # 说明：
 # 1. 所有日志格式均为json

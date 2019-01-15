@@ -13,6 +13,8 @@ class ComposerStaticInitd91a89d496a5c099a47239a903c48dc3
         ),
         'G' => 
         array (
+            'Google\\Protobuf\\' => 16,
+            'GPBMetadata\\Google\\Protobuf\\' => 28,
             'GPBMetadata\\' => 12,
         ),
     );
@@ -21,6 +23,14 @@ class ComposerStaticInitd91a89d496a5c099a47239a903c48dc3
         'Routeguide\\' => 
         array (
             0 => __DIR__ . '/../..' . '/Routeguide',
+        ),
+        'Google\\Protobuf\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/google/protobuf/php/src/Google/Protobuf',
+        ),
+        'GPBMetadata\\Google\\Protobuf\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/google/protobuf/php/src/GPBMetadata/Google/Protobuf',
         ),
         'GPBMetadata\\' => 
         array (

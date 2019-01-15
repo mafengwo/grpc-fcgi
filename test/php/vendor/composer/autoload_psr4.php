@@ -7,5 +7,7 @@ $baseDir = dirname($vendorDir);
 
 return array(
     'Routeguide\\' => array($baseDir . '/Routeguide'),
+    'Google\\Protobuf\\' => array($vendorDir . '/google/protobuf/php/src/Google/Protobuf'),
+    'GPBMetadata\\Google\\Protobuf\\' => array($vendorDir . '/google/protobuf/php/src/GPBMetadata/Google/Protobuf'),
     'GPBMetadata\\' => array($baseDir . '/GPBMetadata'),
 );

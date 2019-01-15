@@ -8,6 +8,7 @@ import (
 	"github.com/mafengwo/grpc-fcgi/test/client/route_guide"
 	"log"
 	"math/rand"
+	"os"
 	"strconv"
 	"time"
 
@@ -59,6 +60,11 @@ func main() {
 			switch *method {
 			case "get_feature":
 				err = getFeature(ctx, &respHeader, &respTrailer)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+				fmt.Printf("header: %+v, trailer: %+v\n", respHeader, respTrailer)
+				os.Exit(1)
 				break
 			case "list_features":
 				err = listFeatures(ctx, &respHeader, &respTrailer)

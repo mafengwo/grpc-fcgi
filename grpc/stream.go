@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -104,14 +105,40 @@ func (p *Proxy) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) *sta
 		return status.Newf(codes.Internal, "got fastcgi status: %d", statusCode)
 	}
 
-	responseMetadata := metadata.MD{}
+	grpcStatus, grpcMessage := codes.OK, ""
+	headers, trailer := metadata.MD{}, metadata.MD{}
 	for k, v := range p.filterToGrpcHeaders(resp.Headers) {
-		responseMetadata[strings.ToLower(k)] = v
-	}
-	if err := stream.SendHeader(responseMetadata); err != nil {
-		return status.Newf(codes.Internal, "failed to send headers: %s", err)
+		lowerKey := strings.ToLower(k)
+
+		switch {
+		case lowerKey == "grpc-status":
+			httpGrpcStatus, err := strconv.Atoi(v[0])
+			if err != nil {
+				return status.Newf(codes.Internal, "grpc-status is not numeric:  %s", v[0])
+			}
+			grpcStatus = codes.Code(httpGrpcStatus)
+			break
+		case lowerKey == "grpc-message":
+			grpcMessage = v[0]
+			break
+		case strings.HasPrefix(lowerKey, "trailer-"):
+			trailer[strings.TrimPrefix(lowerKey, "trailer-")] = v
+			break
+		default:
+			headers[lowerKey] = v
+			break
+		}
 	}
 
+	if len(headers) > 0 {
+		if err := stream.SendHeader(headers); err != nil {
+			return status.Newf(codes.Internal, "failed to send headers: %s", err)
+		}
+	}
+
+	if len(trailer) > 0 {
+		stream.SetTrailer(trailer)
+	}
 	responseFrame := frame{
 		payload: resp.Body,
 	}
@@ -119,7 +146,7 @@ func (p *Proxy) sendResponse(stream grpc.ServerStream, resp *fcgi.Response) *sta
 		return status.Newf(codes.Internal, "failed to send message: %s", err)
 	}
 
-	return status.Newf(codes.OK, "")
+	return status.Newf(grpcStatus, grpcMessage)
 }
 
 func (p *Proxy) filterToGrpcHeaders(fcgiHeaders map[string][]string) map[string][]string {

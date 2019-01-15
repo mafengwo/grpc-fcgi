@@ -10,6 +10,11 @@ list(, $method) = explode("/", trim($_SERVER['REQUEST_URI'], "/"));
 switch($method) {
     case "GetFeature":
         $resp = get_feature($body);
+        header("grpc-status: 12");
+        header("grpc-message: message");
+        header("test-header:".json_encode($_SERVER));
+        header("trailer-a: ta");
+        header("HTTP/1.1 404 Not Found");
         break;
     case "ListFeatures":
         break;
