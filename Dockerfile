@@ -1,4 +1,4 @@
-FROM centos:7
+FROM hub.mfwdev.com/base/centos:7.5.1804
 
 ADD ./grpc_fastcgi_proxy /usr/local/bin/grpc_fastcgi_proxy
 

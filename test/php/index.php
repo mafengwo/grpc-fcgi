@@ -16,6 +16,7 @@ switch($method) {
         header("trailer-a: ta");
         header("HTTP/1.1 404 Not Found");
         break;
+
     case "ListFeatures":
         break;
     case "RecordRoute":
