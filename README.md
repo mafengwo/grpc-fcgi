@@ -22,7 +22,7 @@
 本工具会将metadata部分以fastcgi参数的形式传入到PHP, 但会进行简单地转换：
 1. 将metadata的key全部转成大写。
 2. 将key中的"-"转成"_"
-3. 在key的前面附上 HTTP_
+3. 在key的前面附上 TRAILER_
 
 除了metadata中的key之外，fastcgi参数中还会包括：
 1. CONTENT_TYPE 取值统一为 "application/grpc"

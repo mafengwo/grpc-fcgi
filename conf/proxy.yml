@@ -3,7 +3,7 @@ address: "0.0.0.0:50051"
 
 # 每次请求的处理超时时间。单位：秒
 # 如果超时，会返回 Deadline exceeded 错误（grpc的错误码为4）
-timeout: 10
+timeout: 60
 
 # pprof 工具的服务地址
 # 我们可以通过访问路径/debug/pprof, 获知该代理程序的运行状态（内存占用，goroutine数量等）
