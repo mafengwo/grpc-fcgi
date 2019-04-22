@@ -36,24 +36,17 @@ func (p *Proxy) handleStream(srv interface{}, stream grpc.ServerStream) error {
 	}
 	defer cancelc()
 
-	proxyDone := make(chan *status.Status)
+	proxyDone := make(chan *status.Status, 1)
 	go func() {
 		s := p.handleRequest(stream, req)
 		proxyDone <- s
 	}()
-
-	handlePendingResponse := func() {
-		go func() {
-			<-proxyDone
-		}()
-	}
 
 	var result *status.Status
 	select {
 	case <-req.ctx.Done():
 		req.errorLogger.Debug("request context deadline exceeded")
 		result = status.Newf(codes.DeadlineExceeded, "context deadline exceeded")
-		handlePendingResponse()
 	case result = <-proxyDone:
 		if result.Code() != codes.OK {
 			req.errorLogger.Error(fmt.Sprintf("execute request failed: %v", result.Message()))
