@@ -383,17 +383,11 @@ func nop() {}
 
 // testHooks. Always non-nil.
 var (
-	testHookEnterRoundTrip   = nop
-	testHookWaitResLoop      = nop
-	testHookPrePendingDial   = nop
-	testHookPostPendingDial  = nop
-
 	testHookMu                     sync.Locker = fakeLocker{} // guards following
 	testHookReadLoopBeforeNextRead             = nop
 )
 
 func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err error) {
-	testHookEnterRoundTrip()
 
 	pc.mu.Lock()
 	pc.numExpectedResponses++
@@ -401,8 +395,6 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 
 	gone := make(chan struct{})
 	defer close(gone)
-
-	const debugRoundTrip = false
 
 	// Write the request concurrently with waiting for a response,
 	// in case the server decides to reply before reading our full
@@ -421,41 +413,25 @@ func (pc *persistConn) roundTrip(req *transportRequest) (resp *Response, err err
 	var respHeaderTimer <-chan time.Time
 	ctxDoneChan := req.Context().Done()
 	for {
-		testHookWaitResLoop()
 		select {
 		case err := <-writeErrCh:
-			if debugRoundTrip {
-				req.logf("writeErrCh resv: %T/%#v", err, err)
-			}
 			if err != nil {
 				pc.close(fmt.Errorf("write error: %v", err))
 				return nil, pc.mapRoundTripError(req, startBytesWritten, err)
 			}
 			if d := pc.t.ResponseHeaderTimeout; d > 0 {
-				if debugRoundTrip {
-					req.logf("starting timer for %v", d)
-				}
 				timer := time.NewTimer(d)
 				defer timer.Stop() // prevent leaks
 				respHeaderTimer = timer.C
 			}
 		case <-pc.closech:
-			if debugRoundTrip {
-				req.logf("closech recv: %T %#v", pc.closed, pc.closed)
-			}
 			return nil, pc.mapRoundTripError(req, startBytesWritten, pc.closed)
 		case <-respHeaderTimer:
-			if debugRoundTrip {
-				req.logf("timeout waiting for response headers.")
-			}
 			pc.close(errTimeout)
 			return nil, errTimeout
 		case re := <-resc:
 			if (re.res == nil) == (re.err == nil) {
 				panic(fmt.Sprintf("internal error: exactly one of res or err should be set; nil=%v", re.res == nil))
-			}
-			if debugRoundTrip {
-				req.logf("resc recv: %p, %T/%#v", re.res, re.err, re.err)
 			}
 			if re.err != nil {
 				return nil, pc.mapRoundTripError(req, startBytesWritten, re.err)
